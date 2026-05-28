@@ -299,10 +299,13 @@ async function runBrowserSignup(email, password, task) {
     const pwVisible = await pwInput.isVisible({ timeout: 5000 }).catch(() => false);
 
     if (emailVisible && pwVisible) {
-      task.logs.push('[BROWSER] 填写表单（React 兼容模式）...');
+      task.logs.push('[BROWSER] 填写表单（4字段: 名称+邮箱+密码+确认密码）...');
 
-      // 使用 React nativeInputValueSetter 方式注入值
-      await page.evaluate(({ email, password }) => {
+      // Qwen 注册需要 4 个字段：名称、邮箱、密码、确认密码
+      const username = email.split('@')[0] + Math.floor(Math.random() * 100);
+
+      // 使用 React nativeInputValueSetter 方式注入所有字段值
+      const fillResult = await page.evaluate(({ username, email, password }) => {
         function setReactInputValue(input, value) {
           const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
             window.HTMLInputElement.prototype, 'value'
@@ -311,26 +314,51 @@ async function runBrowserSignup(email, password, task) {
           input.dispatchEvent(new Event('input', { bubbles: true }));
           input.dispatchEvent(new Event('change', { bubbles: true }));
         }
-        const emailEl = document.querySelector('input[type="email"], input[name="email"], input[placeholder*="mail"], input[placeholder*="邮箱"]');
-        const pwEl = document.querySelector('input[type="password"], input[name="password"], input[placeholder*="assword"], input[placeholder*="密码"]');
+
+        const allInputs = Array.from(document.querySelectorAll('input')).filter(el => el.offsetParent !== null);
+
+        // 找名称字段（type=text 且非 hidden）
+        const nameEl = allInputs.find(el =>
+          el.type === 'text' &&
+          (el.placeholder?.match(/name|名称|昵称|用户名/i) || el.name?.match(/name|nickname/i))
+        ) || allInputs.find(el => el.type === 'text');
+
+        // 找邮箱字段
+        const emailEl = allInputs.find(el =>
+          el.type === 'email' || el.placeholder?.match(/mail|邮箱/i) || el.name?.match(/email/i)
+        );
+
+        // 找密码字段（第一个是密码，第二个是确认密码）
+        const pwInputs = allInputs.filter(el => el.type === 'password');
+        const pwEl = pwInputs[0];
+        const pw2El = pwInputs[1];
+
+        if (nameEl) { nameEl.focus(); setReactInputValue(nameEl, username); }
         if (emailEl) { emailEl.focus(); setReactInputValue(emailEl, email); }
         if (pwEl) { pwEl.focus(); setReactInputValue(pwEl, password); }
-      }, { email, password });
+        if (pw2El) { pw2El.focus(); setReactInputValue(pw2El, password); }
+
+        return {
+          name: !!nameEl, email: !!emailEl, pw: !!pwEl, pw2: !!pw2El,
+          totalInputs: allInputs.length
+        };
+      }, { username, email, password });
       await page.waitForTimeout(800);
 
-      // 补充键盘输入触发额外事件（双保险）
-      await emailInput.click();
-      await page.keyboard.press('End');
-      await page.keyboard.type(' ', { delay: 50 });
-      await page.keyboard.press('Backspace');
-      await page.waitForTimeout(300);
-      await pwInput.click();
-      await page.keyboard.press('End');
-      await page.keyboard.type(' ', { delay: 50 });
-      await page.keyboard.press('Backspace');
+      task.logs.push(`[BROWSER] 字段检测: name=${fillResult.name}, email=${fillResult.email}, pw=${fillResult.pw}, pw2=${fillResult.pw2}, 总input数=${fillResult.totalInputs}`);
+
+      // 补充键盘输入触发额外事件（逐个可见 input 确认）
+      const allVisibleInputs = await page.locator('input:visible').all();
+      for (const input of allVisibleInputs) {
+        await input.click().catch(() => {});
+        await page.keyboard.press('End');
+        await page.keyboard.type(' ', { delay: 30 });
+        await page.keyboard.press('Backspace');
+        await page.waitForTimeout(200);
+      }
       await page.waitForTimeout(500);
 
-      task.logs.push('[BROWSER] 表单值已注入');
+      task.logs.push(`[BROWSER] 表单已填写: 名称=${username}, 邮箱=${email}, 密码+确认密码`);
 
       // 勾选条款复选框（JS 方式）
       task.logs.push('[BROWSER] 查找并勾选条款复选框...');
@@ -364,32 +392,35 @@ async function runBrowserSignup(email, password, task) {
 
         if (isDisabled) {
           task.logs.push('[BROWSER] 按钮仍禁用，强制触发 React 状态更新...');
-          await page.evaluate(({ email, password }) => {
+          await page.evaluate(({ username, email, password }) => {
             function forceReactUpdate(input, value) {
               const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
               setter.call(input, value);
               input.dispatchEvent(new Event('input', { bubbles: true }));
               input.dispatchEvent(new Event('change', { bubbles: true }));
-              // React synthetic event 兼容
-              const reactEv = new Event('input', { bubbles: true });
-              Object.defineProperty(reactEv, 'target', { value: input, writable: false });
-              input.dispatchEvent(reactEv);
+              const ev = new Event('input', { bubbles: true });
+              Object.defineProperty(ev, 'target', { value: input, writable: false });
+              input.dispatchEvent(ev);
             }
-            const emailEl = document.querySelector('input[type="email"], input[name="email"]');
-            const pwEl = document.querySelector('input[type="password"]');
+            const allInputs = Array.from(document.querySelectorAll('input')).filter(el => el.offsetParent !== null);
+            const nameEl = allInputs.find(el => el.type === 'text');
+            const emailEl = allInputs.find(el => el.type === 'email' || el.placeholder?.match(/mail|邮箱/i));
+            const pwInputs = allInputs.filter(el => el.type === 'password');
+            if (nameEl) forceReactUpdate(nameEl, username);
             if (emailEl) forceReactUpdate(emailEl, email);
-            if (pwEl) forceReactUpdate(pwEl, password);
-            // 强制启用所有提交按钮
+            if (pwInputs[0]) forceReactUpdate(pwInputs[0], password);
+            if (pwInputs[1]) forceReactUpdate(pwInputs[1], password);
+            // 强制启用提交按钮
             document.querySelectorAll('button[type="submit"], button[class*="submit"]').forEach(btn => {
               btn.removeAttribute('disabled');
               btn.classList.remove('disabled');
               btn.style.pointerEvents = 'auto';
             });
-            // 再次确保 checkbox
+            // 确保 checkbox 勾选
             document.querySelectorAll('input[type="checkbox"]').forEach(cb => {
               if (!cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); }
             });
-          }, { email, password });
+          }, { username, email, password });
           await page.waitForTimeout(1500);
           const stillDisabled = await submitBtn.isDisabled().catch(() => true);
           task.logs.push(`[BROWSER] 强制处理后 disabled=${stillDisabled}`);
