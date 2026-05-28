@@ -19,6 +19,69 @@ export function hasTools(reqBody) {
 }
 
 /**
+ * 第一阶段：构建轻量 hint messages
+ * 只告诉模型有哪些工具可用（名称+简短描述），不带完整 schema 和 DSML 格式说明
+ * 目的：降低 prompt 特征，让请求看起来更像普通对话
+ */
+export function buildToolHint(messages, tools) {
+  const toolList = (tools || []).map(t => {
+    const fn = t.function || t;
+    return `${fn?.name || ''}: ${fn?.description || ''}`;
+  }).filter(Boolean);
+
+  const hint = `You have access to the following tools: ${toolList.join('; ')}. If you need to use any tool to answer the user's question, indicate which tool you want to call and with what parameters.`;
+
+  // 把 hint 追加到已有的 system message 中，或创建新的
+  const result = [...messages];
+  const sysIdx = result.findIndex(m => m.role === 'system');
+  if (sysIdx >= 0) {
+    result[sysIdx] = { ...result[sysIdx], content: result[sysIdx].content + '\n\n' + hint };
+  } else {
+    result.unshift({ role: 'system', content: hint });
+  }
+
+  // 处理历史中的 tool_calls 和 tool 角色（保持兼容）
+  return result.map(m => {
+    if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+      const callDesc = m.tool_calls.map(tc => {
+        const fn = tc.function || tc;
+        return `Called ${fn.name}(${fn.arguments || ''})`;
+      }).join('; ');
+      const baseText = typeof m.content === 'string' ? m.content : '';
+      return { ...m, content: baseText + '\n[Tool calls: ' + callDesc + ']', tool_calls: undefined };
+    }
+    if (m.role === 'tool') {
+      return { role: 'user', content: `[Tool result for ${m.tool_call_id || 'unknown'}]: ${m.content || ''}` };
+    }
+    return m;
+  });
+}
+
+/**
+ * 检测模型第一阶段回复中是否暗示要调用工具
+ */
+export function detectToolIntent(responseText, tools) {
+  if (!responseText || !tools?.length) return false;
+  const text = responseText.toLowerCase();
+
+  // 检查是否提到了任何工具名称 + 调用意图
+  const toolNames = tools.map(t => ((t.function || t)?.name || '').toLowerCase()).filter(Boolean);
+  const hasToolMention = toolNames.some(name => text.includes(name));
+
+  // 调用意图关键词
+  const intentKeywords = [
+    'let me call', 'i\'ll call', 'i will call', 'i need to call',
+    'let me use', 'i\'ll use', 'i will use', 'using the',
+    'calling', 'invoke', 'execute',
+    '我来调用', '需要调用', '使用工具', '调用工具', '让我查',
+    '我需要', '我来查', '帮你查',
+  ];
+  const hasIntent = intentKeywords.some(kw => text.includes(kw));
+
+  return hasToolMention || hasIntent;
+}
+
+/**
  * 构建工具 prompt（注入到 system message）
  */
 export function buildToolPromptBlock(tools) {
