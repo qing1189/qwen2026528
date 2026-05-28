@@ -299,30 +299,60 @@ async function runBrowserSignup(email, password, task) {
     const pwVisible = await pwInput.isVisible({ timeout: 5000 }).catch(() => false);
 
     if (emailVisible && pwVisible) {
-      task.logs.push('[BROWSER] 填写表单...');
+      task.logs.push('[BROWSER] 填写表单（React 兼容模式）...');
+
+      // 使用 React nativeInputValueSetter 方式注入值
+      await page.evaluate(({ email, password }) => {
+        function setReactInputValue(input, value) {
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value'
+          ).set;
+          nativeInputValueSetter.call(input, value);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        const emailEl = document.querySelector('input[type="email"], input[name="email"], input[placeholder*="mail"], input[placeholder*="邮箱"]');
+        const pwEl = document.querySelector('input[type="password"], input[name="password"], input[placeholder*="assword"], input[placeholder*="密码"]');
+        if (emailEl) { emailEl.focus(); setReactInputValue(emailEl, email); }
+        if (pwEl) { pwEl.focus(); setReactInputValue(pwEl, password); }
+      }, { email, password });
+      await page.waitForTimeout(800);
+
+      // 补充键盘输入触发额外事件（双保险）
       await emailInput.click();
-      await emailInput.type(email, { delay: 30 });
-      await page.waitForTimeout(500);
+      await page.keyboard.press('End');
+      await page.keyboard.type(' ', { delay: 50 });
+      await page.keyboard.press('Backspace');
+      await page.waitForTimeout(300);
       await pwInput.click();
-      await pwInput.type(password, { delay: 30 });
+      await page.keyboard.press('End');
+      await page.keyboard.type(' ', { delay: 50 });
+      await page.keyboard.press('Backspace');
       await page.waitForTimeout(500);
 
-      // 勾选条款复选框
-      task.logs.push('[BROWSER] 查找条款复选框...');
-      const checkboxSelectors = [
-        'input[type="checkbox"]', 'span.qwen-chat-checkbox',
-        'div[class*="checkbox"]', 'label[class*="checkbox"]',
-        'span[class*="check"]', 'div[class*="agree"]', 'label[class*="agree"]',
-      ];
-      for (const sel of checkboxSelectors) {
-        const checkboxes = await page.locator(sel).all();
-        for (const cb of checkboxes) {
-          if (await cb.isVisible().catch(() => false)) {
-            await cb.click().catch(() => {});
-            await page.waitForTimeout(300);
-          }
+      task.logs.push('[BROWSER] 表单值已注入');
+
+      // 勾选条款复选框（JS 方式）
+      task.logs.push('[BROWSER] 查找并勾选条款复选框...');
+      const checkboxClicked = await page.evaluate(() => {
+        const selectors = ['input[type="checkbox"]', '.qwen-chat-checkbox', '[class*="checkbox"]', '[class*="agree"]', '[class*="Checkbox"]'];
+        let clicked = 0;
+        for (const sel of selectors) {
+          document.querySelectorAll(sel).forEach(el => {
+            if (el.offsetParent !== null) {
+              el.click();
+              clicked++;
+              if (el.tagName === 'INPUT' && el.type === 'checkbox') {
+                el.checked = true;
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+            }
+          });
         }
-      }
+        return clicked;
+      });
+      task.logs.push(`[BROWSER] 勾选了 ${checkboxClicked} 个复选框`);
+      await page.waitForTimeout(1000);
 
       // 点击提交按钮
       const submitBtn = page.locator('button[type="submit"], button:has-text("Sign up"), button:has-text("注册"), button:has-text("Create"), button:has-text("确认")').first();
@@ -333,16 +363,36 @@ async function runBrowserSignup(email, password, task) {
         task.logs.push(`[BROWSER] 提交按钮可见, disabled=${isDisabled}`);
 
         if (isDisabled) {
-          task.logs.push('[BROWSER] 按钮被禁用，尝试 JS 强制启用...');
-          await page.evaluate(() => {
-            const btn = document.querySelector('button[type="submit"], button.qwenchat-auth-pc-submit-button');
-            if (btn) { btn.removeAttribute('disabled'); btn.classList.remove('disabled'); }
-            document.querySelectorAll('input').forEach(input => {
+          task.logs.push('[BROWSER] 按钮仍禁用，强制触发 React 状态更新...');
+          await page.evaluate(({ email, password }) => {
+            function forceReactUpdate(input, value) {
+              const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+              setter.call(input, value);
               input.dispatchEvent(new Event('input', { bubbles: true }));
               input.dispatchEvent(new Event('change', { bubbles: true }));
+              // React synthetic event 兼容
+              const reactEv = new Event('input', { bubbles: true });
+              Object.defineProperty(reactEv, 'target', { value: input, writable: false });
+              input.dispatchEvent(reactEv);
+            }
+            const emailEl = document.querySelector('input[type="email"], input[name="email"]');
+            const pwEl = document.querySelector('input[type="password"]');
+            if (emailEl) forceReactUpdate(emailEl, email);
+            if (pwEl) forceReactUpdate(pwEl, password);
+            // 强制启用所有提交按钮
+            document.querySelectorAll('button[type="submit"], button[class*="submit"]').forEach(btn => {
+              btn.removeAttribute('disabled');
+              btn.classList.remove('disabled');
+              btn.style.pointerEvents = 'auto';
             });
-          }).catch(() => {});
-          await page.waitForTimeout(1000);
+            // 再次确保 checkbox
+            document.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+              if (!cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); }
+            });
+          }, { email, password });
+          await page.waitForTimeout(1500);
+          const stillDisabled = await submitBtn.isDisabled().catch(() => true);
+          task.logs.push(`[BROWSER] 强制处理后 disabled=${stillDisabled}`);
         }
 
         task.logs.push('[BROWSER] 点击提交...');
@@ -353,17 +403,21 @@ async function runBrowserSignup(email, password, task) {
         }
         await page.waitForTimeout(5000);
 
+        const currentUrl = page.url();
+        task.logs.push(`[BROWSER] 提交后 URL: ${currentUrl}`);
+
         // 判断结果
         const pageText = await page.textContent('body').catch(() => '');
-        if (pageText.includes('verify') || pageText.includes('验证') || pageText.includes('check your email')) {
+        if (pageText.includes('verify') || pageText.includes('验证') || pageText.includes('check your email') || pageText.includes('sent')) {
           task.logs.push('[BROWSER] 注册表单已提交，等待邮件验证');
           result = 'verification_needed';
         } else if (pageText.includes('welcome') || pageText.includes('Welcome') || pageText.includes('成功')) {
           task.logs.push('[BROWSER] 注册成功！');
           result = 'success';
         } else {
-          task.logs.push(`[BROWSER] 提交后页面状态未知: ${pageText.slice(0, 200)}`);
-          result = 'unknown';
+          task.logs.push(`[BROWSER] 提交后页面状态未知: ${pageText.slice(0, 300)}`);
+          // 乐观处理：即使状态未知也尝试等验证邮件
+          result = 'verification_needed';
         }
       } else {
         task.logs.push('[BROWSER] 未找到提交按钮');
