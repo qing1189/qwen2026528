@@ -203,6 +203,195 @@ async function verifyEmailLink(link, task) {
   }
 }
 
+// ========== Playwright 浏览器注册 ==========
+
+async function runBrowserSignup(email, password, task) {
+  let chromium;
+  try {
+    const pw = await import('playwright');
+    chromium = pw.chromium;
+  } catch (err) {
+    task.logs.push(`[BROWSER] Playwright 未安装或导入失败: ${err.message}`);
+    task.logs.push('[BROWSER] 请确保已安装 playwright 依赖');
+    return 'error';
+  }
+
+  task.logs.push('[BROWSER] 启动 Chromium 无头浏览器...');
+
+  const execPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined;
+  let browser;
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      executablePath: execPath,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+    });
+  } catch (err) {
+    task.logs.push(`[BROWSER] 浏览器启动失败: ${err.message}`);
+    task.logs.push('[TIP] Docker 环境需确保安装了 Chromium 及其依赖');
+    return 'error';
+  }
+
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+    viewport: { width: 1280, height: 800 },
+  });
+
+  const page = await context.newPage();
+  let result = 'unknown';
+
+  try {
+    // 导航到 Qwen
+    task.logs.push('[BROWSER] 导航到 chat.qwen.ai...');
+    await page.goto('https://chat.qwen.ai/', { waitUntil: 'networkidle', timeout: 30000 });
+
+    // 查找并点击注册按钮
+    task.logs.push('[BROWSER] 查找注册按钮...');
+    const signupBtn = page.locator('button:has-text("Sign up"), a:has-text("Sign up"), button:has-text("注册"), a:has-text("注册")').first();
+    if (await signupBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+      task.logs.push('[BROWSER] 点击注册按钮...');
+      await signupBtn.click();
+      await page.waitForTimeout(3000);
+    } else {
+      task.logs.push('[BROWSER] 未找到注册按钮，尝试直接 URL...');
+      await page.goto('https://chat.qwen.ai/auth/signup', { waitUntil: 'networkidle', timeout: 30000 });
+    }
+
+    // 检测滑块验证码
+    task.logs.push('[BROWSER] 检测 WAF 滑块验证码...');
+    const captchaFrame = page.frameLocator('iframe[id*="aliyun"], iframe[src*="aliyun"], iframe[title*="验证"]');
+    const captchaVisible = await captchaFrame.locator('#nc_1_n1z, .nc_iconfont, .btn_slide').isVisible().catch(() => false);
+
+    if (captchaVisible) {
+      task.logs.push('[BROWSER] 检测到阿里云滑块验证码，尝试滑动...');
+      const slider = captchaFrame.locator('#nc_1_n1z, .btn_slide, .nc_iconfont.btn_slide').first();
+      const sliderBox = await slider.boundingBox().catch(() => null);
+      if (sliderBox) {
+        const startX = sliderBox.x + sliderBox.width / 2;
+        const startY = sliderBox.y + sliderBox.height / 2;
+        const endX = startX + 280;
+        await page.mouse.move(startX, startY);
+        await page.mouse.down();
+        const steps = 20;
+        for (let i = 1; i <= steps; i++) {
+          const progress = i / steps;
+          const x = startX + (endX - startX) * progress;
+          const y = startY + Math.sin(progress * Math.PI) * 3;
+          await page.mouse.move(x, y, { steps: 1 });
+          await page.waitForTimeout(30 + Math.random() * 40);
+        }
+        await page.mouse.up();
+        await page.waitForTimeout(2000);
+        task.logs.push('[BROWSER] 滑块拖动完成');
+      } else {
+        task.logs.push('[BROWSER] 未能定位滑块位置');
+      }
+    } else {
+      task.logs.push('[BROWSER] 无 WAF 滑块验证码');
+    }
+
+    // 填写注册表单
+    task.logs.push('[BROWSER] 查找注册表单字段...');
+    const emailInput = page.locator('input[type="email"], input[name="email"], input[placeholder*="mail"], input[placeholder*="邮箱"]').first();
+    const pwInput = page.locator('input[type="password"], input[name="password"], input[placeholder*="assword"], input[placeholder*="密码"]').first();
+
+    const emailVisible = await emailInput.isVisible({ timeout: 5000 }).catch(() => false);
+    const pwVisible = await pwInput.isVisible({ timeout: 5000 }).catch(() => false);
+
+    if (emailVisible && pwVisible) {
+      task.logs.push('[BROWSER] 填写表单...');
+      await emailInput.click();
+      await emailInput.type(email, { delay: 30 });
+      await page.waitForTimeout(500);
+      await pwInput.click();
+      await pwInput.type(password, { delay: 30 });
+      await page.waitForTimeout(500);
+
+      // 勾选条款复选框
+      task.logs.push('[BROWSER] 查找条款复选框...');
+      const checkboxSelectors = [
+        'input[type="checkbox"]', 'span.qwen-chat-checkbox',
+        'div[class*="checkbox"]', 'label[class*="checkbox"]',
+        'span[class*="check"]', 'div[class*="agree"]', 'label[class*="agree"]',
+      ];
+      for (const sel of checkboxSelectors) {
+        const checkboxes = await page.locator(sel).all();
+        for (const cb of checkboxes) {
+          if (await cb.isVisible().catch(() => false)) {
+            await cb.click().catch(() => {});
+            await page.waitForTimeout(300);
+          }
+        }
+      }
+
+      // 点击提交按钮
+      const submitBtn = page.locator('button[type="submit"], button:has-text("Sign up"), button:has-text("注册"), button:has-text("Create"), button:has-text("确认")').first();
+      const btnVisible = await submitBtn.isVisible({ timeout: 3000 }).catch(() => false);
+
+      if (btnVisible) {
+        const isDisabled = await submitBtn.isDisabled().catch(() => true);
+        task.logs.push(`[BROWSER] 提交按钮可见, disabled=${isDisabled}`);
+
+        if (isDisabled) {
+          task.logs.push('[BROWSER] 按钮被禁用，尝试 JS 强制启用...');
+          await page.evaluate(() => {
+            const btn = document.querySelector('button[type="submit"], button.qwenchat-auth-pc-submit-button');
+            if (btn) { btn.removeAttribute('disabled'); btn.classList.remove('disabled'); }
+            document.querySelectorAll('input').forEach(input => {
+              input.dispatchEvent(new Event('input', { bubbles: true }));
+              input.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+          }).catch(() => {});
+          await page.waitForTimeout(1000);
+        }
+
+        task.logs.push('[BROWSER] 点击提交...');
+        try {
+          await submitBtn.click({ timeout: 10000 });
+        } catch {
+          await submitBtn.click({ force: true, timeout: 10000 }).catch(() => {});
+        }
+        await page.waitForTimeout(5000);
+
+        // 判断结果
+        const pageText = await page.textContent('body').catch(() => '');
+        if (pageText.includes('verify') || pageText.includes('验证') || pageText.includes('check your email')) {
+          task.logs.push('[BROWSER] 注册表单已提交，等待邮件验证');
+          result = 'verification_needed';
+        } else if (pageText.includes('welcome') || pageText.includes('Welcome') || pageText.includes('成功')) {
+          task.logs.push('[BROWSER] 注册成功！');
+          result = 'success';
+        } else {
+          task.logs.push(`[BROWSER] 提交后页面状态未知: ${pageText.slice(0, 200)}`);
+          result = 'unknown';
+        }
+      } else {
+        task.logs.push('[BROWSER] 未找到提交按钮');
+        result = 'form_not_found';
+      }
+    } else {
+      task.logs.push(`[BROWSER] 未找到表单字段 (email可见=${emailVisible}, password可见=${pwVisible})`);
+      // 尝试列出所有 input
+      const inputs = await page.locator('input').all();
+      for (let i = 0; i < Math.min(inputs.length, 5); i++) {
+        const type = await inputs[i].getAttribute('type').catch(() => '?');
+        const placeholder = await inputs[i].getAttribute('placeholder').catch(() => '?');
+        const visible = await inputs[i].isVisible().catch(() => false);
+        task.logs.push(`  input[${i}]: type=${type} placeholder=${placeholder} visible=${visible}`);
+      }
+      result = 'form_not_found';
+    }
+  } catch (err) {
+    task.logs.push(`[BROWSER] 异常: ${err.message}`);
+    result = 'error';
+  } finally {
+    await browser.close().catch(() => {});
+    task.logs.push(`[BROWSER] 浏览器已关闭, 结果: ${result}`);
+  }
+
+  return result;
+}
+
 // ========== 注册任务执行 ==========
 
 async function executeRegisterTask(task) {
@@ -257,12 +446,62 @@ async function executeRegisterTask(task) {
       return;
     }
 
-    // 如果被 WAF 拦截，直接失败，不再等待验证邮件
+    // 如果被 WAF 拦截，降级到 Playwright 浏览器注册
     if (signupResult.waf) {
-      task.status = 'failed';
-      task.error = 'WAF 拦截';
-      task.logs.push('[DONE] 注册失败 — 被阿里云 WAF 拦截，无法通过纯 API 方式注册');
-      task.logs.push('[TIP] 可尝试使用浏览器方式注册（qwen-register.js）或手动注册后添加令牌');
+      task.logs.push('[WAF] API 被拦截，降级到 Playwright 浏览器注册...');
+
+      if (task.status === 'cancelled') return;
+
+      const browserResult = await runBrowserSignup(email, password, task);
+
+      if (browserResult === 'success') {
+        // 浏览器注册成功，尝试登录获取 token
+        task.logs.push('[BROWSER] 注册成功，尝试 API 登录获取令牌...');
+        await new Promise(r => setTimeout(r, 3000));
+        const loginToken = await tryApiLogin(email, password, task);
+        if (loginToken) {
+          task.token = loginToken;
+          task.method = 'browser_signup+api_login';
+          task.status = 'success';
+          task.logs.push('[DONE] 注册成功（浏览器注册 + API 登录）');
+          if (task.autoAddToken) {
+            addTokenToPool(loginToken);
+            task.logs.push('[POOL] 令牌已自动添加到令牌池');
+          }
+          return;
+        }
+      } else if (browserResult === 'verification_needed') {
+        // 需要邮件验证
+        task.logs.push('[BROWSER] 注册已提交，需要邮件验证...');
+        try {
+          const verifyResult = await waitForVerificationEmail(email, task, 120000);
+          if (verifyResult.type === 'link') {
+            await verifyEmailLink(verifyResult.value, task);
+          }
+          await new Promise(r => setTimeout(r, 5000));
+          const loginToken = await tryApiLogin(email, password, task);
+          if (loginToken) {
+            task.token = loginToken;
+            task.method = 'browser_signup+verify+login';
+            task.status = 'success';
+            task.logs.push('[DONE] 注册成功（浏览器注册 + 邮件验证 + 登录）');
+            if (task.autoAddToken) {
+              addTokenToPool(loginToken);
+              task.logs.push('[POOL] 令牌已自动添加到令牌池');
+            }
+            return;
+          }
+        } catch (err) {
+          task.logs.push(`[VERIFY] 验证流程失败: ${err.message}`);
+        }
+      }
+
+      // 浏览器注册也失败了
+      if (task.status !== 'success') {
+        task.status = 'failed';
+        task.error = 'WAF 拦截 + 浏览器注册失败';
+        task.logs.push(`[DONE] 注册失败 — 浏览器注册结果: ${browserResult}`);
+      }
       return;
     }
 
