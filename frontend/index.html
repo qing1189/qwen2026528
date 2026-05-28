@@ -229,7 +229,7 @@ td { font-family: 'SF Mono', 'Consolas', monospace; font-size: 0.85em; }
 .model-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
 .cap-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .cap-tag { font-size: 0.72em; padding: 1px 5px; border-radius: 3px; background: rgba(124,77,255,0.15); color: var(--accent2); }
-.log-box { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 12px; max-height: 300px; overflow-y: auto; font-family: 'SF Mono', monospace; font-size: 0.8em; line-height: 1.8; white-space: pre-wrap; word-break: break-all; }
+.log-box { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 12px; max-height: 400px; overflow-y: auto; font-family: 'SF Mono', monospace; font-size: 0.78em; line-height: 1.7; white-space: pre-wrap; word-break: break-all; color: var(--text-dim); }
 .task-item { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 10px 14px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; }
 .task-item .task-info { font-size: 0.85em; }
 .task-status { font-size: 0.8em; padding: 2px 8px; border-radius: 3px; font-weight: 600; }
@@ -403,23 +403,46 @@ async function fetchRegTasks() {
 
 function renderRegTasks(tasks) {
   const el=$('regTaskList');
-  if(!tasks.length){el.innerHTML='<div style="color:var(--text-dim);font-size:0.85em">无任务</div>';return;}
-  el.innerHTML = tasks.map(t => `<div class="task-item">
-    <div class="task-info">
-      <strong>#${t.id}</strong> ${t.email||'(生成中)'} <span class="task-status ${t.status}">${t.status}</span>
-      ${t.error?`<span style="color:var(--red);font-size:0.8em"> ${t.error}</span>`:''}
-    </div>
-    <div style="display:flex;gap:6px">
-      <button class="btn btn-sm" onclick="viewTaskLog(${t.id})">日志</button>
-      ${t.status==='running'?`<button class="btn btn-danger btn-sm" onclick="cancelTask(${t.id})">取消</button>`:''}
+  if(!tasks.length){el.innerHTML='<div style="color:var(--text-dim);font-size:0.85em">无任务</div>';$('regTaskDetailCard').style.display='none';return;}
+  el.innerHTML = tasks.map(t => `<div class="task-item" style="flex-direction:column;align-items:stretch">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <div class="task-info">
+        <strong>#${t.id}</strong> ${t.email||'(生成中)'} <span class="task-status ${t.status}">${t.status}</span>
+        ${t.error?`<span style="color:var(--red);font-size:0.8em"> ${t.error}</span>`:''}
+      </div>
+      <div style="display:flex;gap:6px">
+        ${t.status==='running'?`<button class="btn btn-danger btn-sm" onclick="cancelTask(${t.id})">取消</button>`:''}
+      </div>
     </div>
   </div>`).join('');
+  // 自动加载所有任务的日志
+  loadAllTaskLogs(tasks);
+}
+
+async function loadAllTaskLogs(tasks) {
+  let logsHtml = '';
+  for (const t of tasks) {
+    try {
+      const r = await apiFetch(`${API_BASE}/admin/api/register/task/${t.id}`);
+      const d = await r.json();
+      if (d.success && d.task.logs.length > 0) {
+        logsHtml += `<div style="margin-bottom:12px"><div style="font-size:0.85em;color:var(--accent2);margin-bottom:4px;font-weight:600">#${t.id} - ${d.task.email||'未知'} [${d.task.status}]</div><div class="log-box">${d.task.logs.join('\n')}</div></div>`;
+      }
+    } catch(e) {}
+  }
+  if (logsHtml) {
+    $('regTaskDetailCard').style.display = '';
+    $('regDetailTitle').textContent = '全部任务';
+    $('regTaskLogs').innerHTML = logsHtml;
+  } else {
+    $('regTaskDetailCard').style.display = 'none';
+  }
 }
 
 async function viewTaskLog(id) {
   try{const r=await apiFetch(`${API_BASE}/admin/api/register/task/${id}`);const d=await r.json();
     if(d.success){$('regTaskDetailCard').style.display='';$('regDetailTitle').textContent=`#${id} - ${d.task.email||''}`;
-      $('regTaskLogs').textContent=d.task.logs.join('\n');$('regTaskLogs').scrollTop=9999;}}catch(e){}
+      $('regTaskLogs').innerHTML=`<div class="log-box">${d.task.logs.join('\n')}</div>`;$('regTaskLogs').scrollTop=9999;}}catch(e){}
 }
 
 async function cancelTask(id) {
@@ -442,7 +465,7 @@ $('authKeyInput').addEventListener('keydown',e=>{if(e.key==='Enter')$('authSubmi
 function setupRefresh() {
   if(refreshTimer)clearInterval(refreshTimer);
   const ms=parseInt($('interval').value);
-  if(ms>0)refreshTimer=setInterval(()=>{fetchStats();},ms);
+  if(ms>0)refreshTimer=setInterval(()=>{fetchStats(); if($('tab-register').style.display!=='none')fetchRegTasks();},ms);
 }
 $('interval').addEventListener('change',setupRefresh);
 $('refreshBtn').addEventListener('click',()=>{fetchStats();fetchApiKeys();fetchRegTasks();});
