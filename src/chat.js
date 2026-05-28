@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { chatHeaders } from './headers.js';
 import { reportTokenError, reportTokenSuccess } from './auth.js';
 
@@ -59,9 +60,9 @@ export async function completion({ token, model, messages, chatMode = 't2t', thi
     model,
     parent_id: null,
     messages: messages.map(msg => ({
-      fid: crypto.randomUUID(),
+      fid: randomUUID(),
       parentId: null,
-      childrenIds: [crypto.randomUUID()],
+      childrenIds: [randomUUID()],
       role: msg.role,
       content: msg.content,
       user_action: 'chat',
