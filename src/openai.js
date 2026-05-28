@@ -1,6 +1,7 @@
 import { completion, parseSSEStream } from './chat.js';
 import { enqueueRequest, dispatchQueued } from './queue.js';
 import { getModels } from './models.js';
+import { hasTools, injectToolCallContext, parseToolCallsFromText, createSieve } from './toolcall.js';
 
 const MODE_SUFFIXES = {
   '-thinking':       { chatMode: 't2t', forceThinking: true },
@@ -79,7 +80,15 @@ export async function handleOpenAICompletion(req, res) {
   const { baseModel, chatMode, forceThinking } = parseModelSuffix(model);
   const thinkingEnabled = isThinkingEnabled(model, forceThinking, req.body.enable_thinking);
   const searchEnabled = isSearchEnabled(chatMode, req.body.enable_search);
-  const qwenMessages = buildQwenMessages(messages, chatMode);
+
+  // 工具调用支持：如果请求带有 tools，注入工具上下文
+  const toolcallEnabled = hasTools(req.body);
+  let processedMessages = messages;
+  if (toolcallEnabled) {
+    processedMessages = injectToolCallContext(messages, req.body.tools);
+  }
+
+  const qwenMessages = buildQwenMessages(processedMessages, chatMode);
 
   const requestId = `chatcmpl-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   let result;
@@ -125,46 +134,79 @@ export async function handleOpenAICompletion(req, res) {
         choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
       })}\n\n`);
 
+      const sieve = toolcallEnabled ? createSieve() : null;
+      let toolCallsEmitted = false;
+
       for await (const event of parseSSEStream(streamBody)) {
         if (event.type === 'content') {
-          res.write(`data: ${JSON.stringify({
-            id: requestId,
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model,
-            choices: [{ index: 0, delta: { content: event.content }, finish_reason: null }],
-          })}\n\n`);
+          if (sieve) {
+            const out = sieve.push(event.content);
+            if (out.textDelta) {
+              res.write(`data: ${JSON.stringify({
+                id: requestId, object: 'chat.completion.chunk',
+                created: Math.floor(Date.now() / 1000), model,
+                choices: [{ index: 0, delta: { content: out.textDelta }, finish_reason: null }],
+              })}\n\n`);
+            }
+            if (out.toolCallsDelta) {
+              toolCallsEmitted = true;
+              res.write(`data: ${JSON.stringify({
+                id: requestId, object: 'chat.completion.chunk',
+                created: Math.floor(Date.now() / 1000), model,
+                choices: [{ index: 0, delta: { tool_calls: out.toolCallsDelta }, finish_reason: null }],
+              })}\n\n`);
+            }
+          } else {
+            res.write(`data: ${JSON.stringify({
+              id: requestId, object: 'chat.completion.chunk',
+              created: Math.floor(Date.now() / 1000), model,
+              choices: [{ index: 0, delta: { content: event.content }, finish_reason: null }],
+            })}\n\n`);
+          }
         } else if (event.type === 'thinking') {
           res.write(`data: ${JSON.stringify({
-            id: requestId,
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model,
+            id: requestId, object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000), model,
             choices: [{ index: 0, delta: { reasoning_content: event.content }, finish_reason: null }],
           })}\n\n`);
         } else if (event.type === 'image') {
           res.write(`data: ${JSON.stringify({
-            id: requestId,
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model,
+            id: requestId, object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000), model,
             choices: [{ index: 0, delta: { content: event.content }, finish_reason: null }],
           })}\n\n`);
         } else if (event.type === 'research') {
           res.write(`data: ${JSON.stringify({
-            id: requestId,
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model,
+            id: requestId, object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000), model,
             choices: [{ index: 0, delta: { reasoning_content: `[${event.stage}] ${event.content}` }, finish_reason: null }],
           })}\n\n`);
         } else if (event.type === 'done') {
+          // flush sieve
+          if (sieve) {
+            const out = sieve.flush();
+            if (out.textDelta) {
+              res.write(`data: ${JSON.stringify({
+                id: requestId, object: 'chat.completion.chunk',
+                created: Math.floor(Date.now() / 1000), model,
+                choices: [{ index: 0, delta: { content: out.textDelta }, finish_reason: null }],
+              })}\n\n`);
+            }
+            if (out.toolCallsDelta) {
+              toolCallsEmitted = true;
+              res.write(`data: ${JSON.stringify({
+                id: requestId, object: 'chat.completion.chunk',
+                created: Math.floor(Date.now() / 1000), model,
+                choices: [{ index: 0, delta: { tool_calls: out.toolCallsDelta }, finish_reason: null }],
+              })}\n\n`);
+            }
+          }
+
+          const finishReason = toolCallsEmitted ? 'tool_calls' : 'stop';
           res.write(`data: ${JSON.stringify({
-            id: requestId,
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model,
-            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+            id: requestId, object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000), model,
+            choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
             usage: event.usage ? {
               prompt_tokens: event.usage.input_tokens || 0,
               completion_tokens: event.usage.output_tokens || 0,
@@ -191,6 +233,24 @@ export async function handleOpenAICompletion(req, res) {
         }
       }
 
+      const message = {
+        role: 'assistant',
+        content: fullContent,
+        ...(fullThinking ? { reasoning_content: fullThinking } : {}),
+      };
+
+      let finishReason = 'stop';
+
+      // 工具调用解析
+      if (toolcallEnabled && fullContent) {
+        const parsed = parseToolCallsFromText(fullContent);
+        if (parsed.toolCalls.length > 0) {
+          message.content = parsed.content;
+          message.tool_calls = parsed.toolCalls;
+          finishReason = 'tool_calls';
+        }
+      }
+
       const response = {
         id: requestId,
         object: 'chat.completion',
@@ -198,12 +258,8 @@ export async function handleOpenAICompletion(req, res) {
         model,
         choices: [{
           index: 0,
-          message: {
-            role: 'assistant',
-            content: fullContent,
-            ...(fullThinking ? { reasoning_content: fullThinking } : {}),
-          },
-          finish_reason: 'stop',
+          message,
+          finish_reason: finishReason,
         }],
         usage: {
           prompt_tokens: usage?.input_tokens || 0,
