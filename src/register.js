@@ -149,14 +149,21 @@ async function tryApiSignup(email, password, task) {
 
     if (typeof res.data === 'object' && res.data.token) {
       task.logs.push('[API] 直接注册成功！获取到令牌');
-      return res.data.token;
+      return { token: res.data.token, waf: false };
     }
 
-    task.logs.push(`[API] 注册响应: ${res.status} ${JSON.stringify(res.data).slice(0, 200)}`);
-    return null;
+    // 检测 WAF 拦截
+    const dataStr = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+    if (dataStr.includes('aliyun_waf') || dataStr.includes('waf_aa') || dataStr.includes('<!doctype')) {
+      task.logs.push('[API] 被阿里云 WAF 拦截，直接 API 注册不可用');
+      return { token: null, waf: true };
+    }
+
+    task.logs.push(`[API] 注册响应: ${res.status} ${dataStr.slice(0, 200)}`);
+    return { token: null, waf: false };
   } catch (err) {
     task.logs.push(`[API] 注册请求失败: ${err.message}`);
-    return null;
+    return { token: null, waf: false };
   }
 }
 
@@ -237,23 +244,31 @@ async function executeRegisterTask(task) {
     if (task.status === 'cancelled') return;
 
     // Step 2: 尝试直接 API 注册
-    const apiToken = await tryApiSignup(email, password, task);
-    if (apiToken) {
-      task.token = apiToken;
+    const signupResult = await tryApiSignup(email, password, task);
+    if (signupResult.token) {
+      task.token = signupResult.token;
       task.method = 'api_direct';
       task.status = 'success';
       task.logs.push('[DONE] 注册成功（API 直接注册）');
-      // 自动添加到令牌池
       if (task.autoAddToken) {
-        addTokenToPool(apiToken);
+        addTokenToPool(signupResult.token);
         task.logs.push('[POOL] 令牌已自动添加到令牌池');
       }
       return;
     }
 
+    // 如果被 WAF 拦截，直接失败，不再等待验证邮件
+    if (signupResult.waf) {
+      task.status = 'failed';
+      task.error = 'WAF 拦截';
+      task.logs.push('[DONE] 注册失败 — 被阿里云 WAF 拦截，无法通过纯 API 方式注册');
+      task.logs.push('[TIP] 可尝试使用浏览器方式注册（qwen-register.js）或手动注册后添加令牌');
+      return;
+    }
+
     if (task.status === 'cancelled') return;
 
-    // Step 3: 等待验证邮件（API 注册可能发了验证邮件）
+    // Step 3: 等待验证邮件（API 注册未被 WAF 拦截但没返回 token，可能需要验证）
     task.logs.push('[VERIFY] 等待验证邮件...');
     try {
       const verifyResult = await waitForVerificationEmail(email, task, 90000);
