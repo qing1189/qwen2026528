@@ -283,8 +283,89 @@ export async function loginAndAddToken(email, password) {
   return entry;
 }
 
+export function removeTokenFromPool(email) {
+  const idx = accountPool.findIndex(t => t.email === email);
+  if (idx === -1) throw new Error('令牌不存在');
+  if (accountPool[idx].activeRequests > 0) throw new Error('令牌正在使用中，请稍后再删除');
+  accountPool.splice(idx, 1);
+  persistTokensToEnv();
+  return { success: true, remaining: accountPool.length };
+}
+
+export async function checkTokenHealth(email) {
+  const entry = accountPool.find(t => t.email === email);
+  if (!entry) throw new Error('令牌不存在');
+
+  const result = { email: entry.email, expired: false, valid: false, error: null };
+
+  // 检查是否过期
+  if (!entry.token) {
+    result.error = '无令牌';
+    return result;
+  }
+
+  if (isTokenExpired(entry.token)) {
+    result.expired = true;
+    // 尝试刷新
+    if (entry.password) {
+      try {
+        await ensureToken(entry);
+        result.valid = true;
+        result.expired = false;
+        result.error = '令牌已刷新';
+      } catch (err) {
+        result.error = `刷新失败: ${err.message}`;
+      }
+    } else {
+      result.error = '令牌已过期，无密码可刷新';
+    }
+    return result;
+  }
+
+  // 用令牌请求模型列表验证有效性
+  try {
+    const res = await fetch(`${BASE_URL}/api/models`, {
+      headers: {
+        'authorization': `Bearer ${entry.token}`,
+        ...requestHeaders(),
+      },
+    });
+    if (res.ok) {
+      result.valid = true;
+      entry.errorCount = 0;
+    } else {
+      const text = await res.text();
+      if (text.includes('aliyun_waf') || text.includes('<!doctype')) {
+        result.error = 'WAF 拦截（但令牌可能有效）';
+        result.valid = true; // WAF 拦截不代表令牌无效
+      } else {
+        result.error = `API 返回 ${res.status}`;
+        entry.errorCount++;
+      }
+    }
+  } catch (err) {
+    result.error = `请求失败: ${err.message}`;
+  }
+
+  return result;
+}
+
+export async function checkAllTokensHealth() {
+  const results = [];
+  for (const entry of accountPool) {
+    try {
+      const r = await checkTokenHealth(entry.email);
+      results.push(r);
+    } catch (err) {
+      results.push({ email: entry.email, valid: false, error: err.message });
+    }
+  }
+  return results;
+}
+
 export function getPoolInfo() {
-  return accountPool.map(t => ({
+  return accountPool.map((t, idx) => ({
+    id: idx,
     email: t.email,
     hasToken: !!t.token,
     expiresAt: t.expiresAt ? new Date(t.expiresAt).toISOString() : null,

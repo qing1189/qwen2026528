@@ -4,7 +4,7 @@ config();
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { loadAccounts, initAccountPool, getPoolInfo, getTotalCapacity, acquireToken, addTokenToPool, loginAndAddToken, loadApiKeys, validateApiKey, getApiKeys, addApiKey, removeApiKey, isApiKeyRequired } from './auth.js';
+import { loadAccounts, initAccountPool, getPoolInfo, getTotalCapacity, acquireToken, addTokenToPool, loginAndAddToken, removeTokenFromPool, checkTokenHealth, checkAllTokensHealth, loadApiKeys, validateApiKey, getApiKeys, addApiKey, removeApiKey, isApiKeyRequired } from './auth.js';
 import { adminAuthMiddleware, isAdminAuthRequired, validateAdminPassword } from './admin-auth.js';
 import { handleOpenAICompletion } from './openai.js';
 import { getModels, handleOpenAIModels } from './models.js';
@@ -116,6 +116,37 @@ app.post('/admin/api/token/login', async (req, res) => {
   try {
     const entry = await loginAndAddToken(email, password);
     res.json({ success: true, email: entry.email });
+  } catch (err) {
+    res.status(500).json({ error: { message: err.message } });
+  }
+});
+
+app.post('/admin/api/token/remove', (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: { message: 'email required' } });
+  try {
+    const result = removeTokenFromPool(email);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: { message: err.message } });
+  }
+});
+
+app.post('/admin/api/token/check', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: { message: 'email required' } });
+  try {
+    const result = await checkTokenHealth(email);
+    res.json({ success: true, result });
+  } catch (err) {
+    res.status(400).json({ error: { message: err.message } });
+  }
+});
+
+app.post('/admin/api/token/check-all', async (req, res) => {
+  try {
+    const results = await checkAllTokensHealth();
+    res.json({ success: true, results });
   } catch (err) {
     res.status(500).json({ error: { message: err.message } });
   }

@@ -71,10 +71,11 @@ header .meta { font-size: 0.85em; color: var(--text-dim); }
       <div class="bar-wrap"><div class="bar-fill" id="queueBar" style="width:0%;background:var(--green)"></div><div class="bar-label" id="queueLabel">0 / 100</div></div>
     </div>
     <div class="card">
-      <h2>令牌池</h2>
+      <h2>令牌池 <button class="btn btn-sm" onclick="checkAllTokens()" style="margin-left:10px">全部检测</button></h2>
+      <div id="checkAllMsg" class="msg"></div>
       <div style="overflow-x:auto">
-        <table><thead><tr><th>账号</th><th>令牌</th><th>过期</th><th>错误</th><th>并发</th><th>健康</th></tr></thead>
-        <tbody id="poolBody"><tr><td colspan="6" class="loading">加载中...</td></tr></tbody></table>
+        <table><thead><tr><th>账号</th><th>令牌</th><th>过期</th><th>错误</th><th>并发</th><th>健康</th><th>操作</th></tr></thead>
+        <tbody id="poolBody"><tr><td colspan="7" class="loading">加载中...</td></tr></tbody></table>
       </div>
     </div>
   </div>
@@ -294,8 +295,8 @@ function renderStatus(data) {
   $('queueBar').style.background = pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--yellow)' : 'var(--green)';
   $('queueLabel').textContent = q + ' / ' + qMax;
   const pb = $('poolBody');
-  if (!data.pool.length) { pb.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim)">无账号</td></tr>'; }
-  else { pb.innerHTML = data.pool.map(t => `<tr><td>${(t.email||'—').slice(0,20)}</td><td>${t.hasToken?'<span style="color:var(--green)">✓</span>':'<span style="color:var(--red)">✗</span>'}</td><td>${formatTime(t.expiresAt)}</td><td>${t.errorCount}</td><td>${t.activeRequests}/${t.maxConcurrent}</td><td>${healthDot(t.errorCount,t.hasToken)}</td></tr>`).join(''); }
+  if (!data.pool.length) { pb.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim)">无账号</td></tr>'; }
+  else { pb.innerHTML = data.pool.map(t => `<tr><td>${(t.email||'—').slice(0,20)}</td><td>${t.hasToken?'<span style="color:var(--green)">✓</span>':'<span style="color:var(--red)">✗</span>'}</td><td>${formatTime(t.expiresAt)}</td><td>${t.errorCount}</td><td>${t.activeRequests}/${t.maxConcurrent}</td><td>${healthDot(t.errorCount,t.hasToken)}</td><td><button class="btn btn-sm" onclick="checkToken('${t.email}')">检测</button> <button class="btn btn-danger btn-sm" onclick="removeToken('${t.email}')">删除</button></td></tr>`).join(''); }
   $('lastRefresh').textContent = new Date().toLocaleTimeString();
 }
 
@@ -344,6 +345,48 @@ $('addKeyForm').addEventListener('submit', async e => {
 });
 
 // ===== Token Management =====
+async function removeToken(email) {
+  if (!confirm(`确定删除令牌: ${email}？`)) return;
+  try {
+    const r = await apiFetch(`${API_BASE}/admin/api/token/remove`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+    const d = await r.json();
+    if (d.success) fetchStats();
+    else alert(d.error?.message || '删除失败');
+  } catch (e) { if (e.message !== 'unauthorized') alert('请求失败'); }
+}
+
+async function checkToken(email) {
+  try {
+    const r = await apiFetch(`${API_BASE}/admin/api/token/check`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+    const d = await r.json();
+    if (d.success) {
+      const res = d.result;
+      const status = res.valid ? '✓ 有效' : '✗ 无效';
+      alert(`令牌检测: ${email}\n状态: ${status}\n${res.error ? '详情: ' + res.error : ''}`);
+      fetchStats();
+    } else { alert(d.error?.message || '检测失败'); }
+  } catch (e) { if (e.message !== 'unauthorized') alert('请求失败'); }
+}
+
+async function checkAllTokens() {
+  const msg = $('checkAllMsg'); msg.textContent = '检测中...'; msg.className = 'msg';
+  try {
+    const r = await apiFetch(`${API_BASE}/admin/api/token/check-all`, { method: 'POST' });
+    const d = await r.json();
+    if (d.success) {
+      const valid = d.results.filter(r => r.valid).length;
+      const total = d.results.length;
+      msg.className = 'msg msg-ok';
+      msg.textContent = `检测完成: ${valid}/${total} 有效`;
+      if (d.results.some(r => !r.valid)) {
+        msg.textContent += ' | 无效: ' + d.results.filter(r => !r.valid).map(r => `${r.email}(${r.error})`).join(', ');
+        msg.className = 'msg msg-err';
+      }
+      fetchStats();
+    } else { msg.className = 'msg msg-err'; msg.textContent = d.error?.message || '检测失败'; }
+  } catch (e) { msg.className = 'msg msg-err'; msg.textContent = '请求失败'; }
+}
+
 $('addTokenForm').addEventListener('submit', async e => {
   e.preventDefault(); const token=$('addTokenInput').value.trim(); const msg=$('addTokenMsg');
   msg.textContent='添加中...';msg.className='msg';
