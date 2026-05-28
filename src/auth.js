@@ -1,10 +1,11 @@
-import { createHash, randomUUID } from 'crypto';
+import { createHash } from 'crypto';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { requestHeaders } from './headers.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const DATA_DIR = resolve(__dirname, '..', 'data');
 const ENV_PATH = resolve(__dirname, '..', '.env');
 
 // ========== .env 持久化工具 ==========

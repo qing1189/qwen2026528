@@ -5,12 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Qwen-2API 管理面板</title>
 <style>
-:root {
-  --bg: #1a1a2e; --surface: #16213e; --border: #0f3460;
-  --text: #e0e0e0; --text-dim: #8892a0;
-  --green: #00e676; --yellow: #ffd600; --red: #ff1744;
-  --accent: #7c4dff; --accent2: #b388ff;
-}
+:root { --bg: #1a1a2e; --surface: #16213e; --border: #0f3460; --text: #e0e0e0; --text-dim: #8892a0; --green: #00e676; --yellow: #ffd600; --red: #ff1744; --accent: #7c4dff; --accent2: #b388ff; }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; min-height: 100vh; }
 .container { max-width: 960px; margin: 0 auto; padding: 20px; }
@@ -27,166 +22,6 @@ header .meta { font-size: 0.85em; color: var(--text-dim); }
 .stat-item .label { font-size: 0.75em; color: var(--text-dim); margin-bottom: 4px; }
 .stat-item .value { font-size: 1.4em; font-weight: 700; }
 .status-ok { color: var(--green); }
-</style>
-</head>
-<body>
-<div class="container">
-  <header>
-    <div><h1>Qwen-2API 管理面板</h1><div class="meta">OpenAI 兼容代理 · chat.qwen.ai</div></div>
-    <div class="controls">
-      <select id="interval" title="自动刷新间隔">
-        <option value="5000">5秒</option><option value="10000" selected>10秒</option>
-        <option value="30000">30秒</option><option value="0">关闭</option>
-      </select>
-      <button id="refreshBtn">刷新</button>
-    </div>
-  </header>
-
-
-  <!-- Tabs -->
-  <div class="card" style="padding:8px 12px;margin-bottom:12px">
-    <div class="tab-bar">
-      <button class="tab-btn active" onclick="switchTab('overview')">总览</button>
-      <button class="tab-btn" onclick="switchTab('tokens')">令牌管理</button>
-      <button class="tab-btn" onclick="switchTab('keys')">API Key</button>
-      <button class="tab-btn" onclick="switchTab('register')">注册机</button>
-      <button class="tab-btn" onclick="switchTab('models')">模型</button>
-    </div>
-  </div>
-
-  <!-- Tab: Overview -->
-  <div id="tab-overview" class="tab-content">
-    <div class="card">
-      <h2>总览</h2>
-      <div class="stats-grid">
-        <div class="stat-item"><div class="label">状态</div><div class="value" id="status">-</div></div>
-        <div class="stat-item"><div class="label">总容量</div><div class="value" id="capacity">-</div></div>
-        <div class="stat-item"><div class="label">账号数</div><div class="value" id="accountCount">-</div></div>
-        <div class="stat-item"><div class="label">队列</div><div class="value" id="queueCount">-</div></div>
-        <div class="stat-item"><div class="label">API Keys</div><div class="value" id="apiKeyCount">-</div></div>
-      </div>
-    </div>
-    <div class="card">
-      <h2>请求队列</h2>
-      <div class="bar-wrap"><div class="bar-fill" id="queueBar" style="width:0%;background:var(--green)"></div><div class="bar-label" id="queueLabel">0 / 100</div></div>
-    </div>
-    <div class="card">
-      <h2>令牌池 <button class="btn btn-sm" onclick="checkAllTokens()" style="margin-left:10px">全部检测</button></h2>
-      <div id="checkAllMsg" class="msg"></div>
-      <div style="overflow-x:auto">
-        <table><thead><tr><th>账号</th><th>令牌</th><th>过期</th><th>错误</th><th>并发</th><th>健康</th><th>操作</th></tr></thead>
-        <tbody id="poolBody"><tr><td colspan="7" class="loading">加载中...</td></tr></tbody></table>
-      </div>
-    </div>
-  </div>
-
-
-  <!-- Tab: Tokens -->
-  <div id="tab-tokens" class="tab-content" style="display:none">
-    <div class="card">
-      <h2>令牌管理</h2>
-      <div class="forms-row">
-        <div>
-          <h3 style="font-size:0.92em;margin-bottom:8px">添加 JWT 令牌</h3>
-          <form id="addTokenForm">
-            <div class="form-group"><label>令牌字符串</label><input type="text" id="addTokenInput" placeholder="粘贴 Qwen JWT 令牌..." required></div>
-            <button type="submit" class="btn">添加</button>
-            <div class="msg" id="addTokenMsg"></div>
-          </form>
-        </div>
-        <div>
-          <h3 style="font-size:0.92em;margin-bottom:8px">登录获取令牌</h3>
-          <form id="loginForm">
-            <div class="form-group"><label>邮箱</label><input type="email" id="loginEmail" placeholder="Qwen 账号邮箱" required></div>
-            <div class="form-group"><label>密码</label><input type="password" id="loginPassword" placeholder="Qwen 账号密码" required></div>
-            <button type="submit" class="btn">登录</button>
-            <div class="msg" id="loginMsg"></div>
-          </form>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Tab: API Keys -->
-  <div id="tab-keys" class="tab-content" style="display:none">
-    <div class="card">
-      <h2>API Key 管理</h2>
-      <form id="addKeyForm" style="display:flex;gap:8px;align-items:flex-end;margin-bottom:12px">
-        <div class="form-group" style="flex:1;margin-bottom:0"><label>新 API Key</label><input type="text" id="addKeyInput" placeholder="输入新的 API Key（如 sk-xxx）"></div>
-        <button type="submit" class="btn">添加</button>
-      </form>
-      <div class="msg" id="addKeyMsg"></div>
-      <div class="key-list" id="keyList"><div class="loading">加载中...</div></div>
-    </div>
-  </div>
-
-
-  <!-- Tab: Register -->
-  <div id="tab-register" class="tab-content" style="display:none">
-    <div class="card">
-      <h2>注册机配置</h2>
-      <div class="forms-row">
-        <div class="form-group"><label>Mail API 地址</label><input type="text" id="regMailApi" placeholder="https://mail.chatgpt.org.uk"></div>
-        <div class="form-group"><label>Mail API Key</label><input type="text" id="regMailKey" placeholder="sk-xxxx"></div>
-      </div>
-      <button class="btn" id="saveRegConfigBtn">保存配置</button>
-      <div class="msg" id="regConfigMsg"></div>
-    </div>
-    <div class="card">
-      <h2>开始注册</h2>
-      <div class="forms-row">
-        <div>
-          <div class="form-group"><label>邮箱（留空自动生成）</label><input type="text" id="regEmail" placeholder="留空则自动生成临时邮箱"></div>
-          <div class="form-group"><label>密码（留空自动生成）</label><input type="text" id="regPassword" placeholder="留空则自动生成"></div>
-        </div>
-        <div>
-          <div class="form-group"><label>注册数量</label><input type="number" id="regCount" value="1" min="1" max="10"></div>
-          <div class="form-group" style="margin-top:20px">
-            <label><input type="checkbox" id="regAutoAdd" checked> 成功后自动添加到令牌池</label>
-          </div>
-        </div>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="btn" id="startRegBtn">开始注册</button>
-        <button class="btn btn-danger" id="clearRegBtn">清除已完成</button>
-      </div>
-      <div class="msg" id="regStartMsg"></div>
-    </div>
-    <div class="card">
-      <h2>注册任务</h2>
-      <div id="regTaskList"><div class="loading">无任务</div></div>
-    </div>
-    <div class="card" id="regTaskDetailCard" style="display:none">
-      <h2>任务日志 <span id="regDetailTitle" style="font-size:0.8em;color:var(--text-dim)"></span></h2>
-      <div id="regTaskLogs" class="log-box"></div>
-    </div>
-  </div>
-
-
-  <!-- Tab: Models -->
-  <div id="tab-models" class="tab-content" style="display:none">
-    <div class="card">
-      <h2>可用模型</h2>
-      <div id="modelGrid"><div class="loading">加载中...</div></div>
-    </div>
-  </div>
-
-  <footer style="text-align:center;color:var(--text-dim);font-size:0.78em;padding:12px">上次刷新: <span id="lastRefresh">-</span></footer>
-</div>
-
-<!-- Auth overlay -->
-<div class="auth-overlay" id="authOverlay" style="display:none">
-  <div class="auth-box">
-    <h3>管理面板认证</h3>
-    <p style="font-size:0.85em;color:var(--text-dim);margin-bottom:12px">请输入管理密码</p>
-    <div class="form-group"><label>管理密码</label><input type="password" id="authKeyInput" placeholder="输入管理密码..."></div>
-    <button class="btn" id="authSubmitBtn">确认</button>
-    <div class="msg" id="authMsg"></div>
-  </div>
-</div>
-
-
-<style>
 table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
 th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
 th { color: var(--text-dim); font-weight: 600; font-size: 0.8em; text-transform: uppercase; }
@@ -200,21 +35,12 @@ td { font-family: 'SF Mono', 'Consolas', monospace; font-size: 0.85em; }
 @media (max-width: 640px) { .forms-row { grid-template-columns: 1fr; } }
 .form-group { margin-bottom: 10px; }
 .form-group label { display: block; font-size: 0.82em; color: var(--text-dim); margin-bottom: 4px; }
-.form-group input[type="text"], .form-group input[type="email"], .form-group input[type="password"], .form-group input[type="number"] {
-  width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 7px 10px; font-size: 0.9em;
-}
+.form-group input[type="text"], .form-group input[type="email"], .form-group input[type="password"] { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 7px 10px; font-size: 0.9em; }
 .form-group input:focus { outline: none; border-color: var(--accent); }
 .btn { background: var(--accent); color: #fff; border: none; border-radius: 4px; padding: 7px 18px; font-size: 0.9em; cursor: pointer; }
-.btn:hover { opacity: 0.85; }
-.btn-danger { background: var(--red); }
-.btn-sm { padding: 4px 10px; font-size: 0.8em; }
-.msg { font-size: 0.82em; margin-top: 6px; min-height: 1.4em; }
-.msg-ok { color: var(--green); } .msg-err { color: var(--red); }
+.btn:hover { opacity: 0.85; } .btn-danger { background: var(--red); } .btn-sm { padding: 4px 10px; font-size: 0.8em; }
+.msg { font-size: 0.82em; margin-top: 6px; min-height: 1.4em; } .msg-ok { color: var(--green); } .msg-err { color: var(--red); }
 .loading { color: var(--text-dim); font-style: italic; }
-</style>
-
-
-<style>
 .auth-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .auth-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 24px; width: 340px; }
 .auth-box h3 { margin-bottom: 12px; color: var(--accent2); }
@@ -230,298 +56,71 @@ td { font-family: 'SF Mono', 'Consolas', monospace; font-size: 0.85em; }
 .model-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
 .cap-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .cap-tag { font-size: 0.72em; padding: 1px 5px; border-radius: 3px; background: rgba(124,77,255,0.15); color: var(--accent2); }
-.log-box { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 12px; max-height: 400px; overflow-y: auto; font-family: 'SF Mono', monospace; font-size: 0.78em; line-height: 1.7; white-space: pre-wrap; word-break: break-all; color: var(--text-dim); }
-.task-item { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 10px 14px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; }
-.task-item .task-info { font-size: 0.85em; }
-.task-status { font-size: 0.8em; padding: 2px 8px; border-radius: 3px; font-weight: 600; }
-.task-status.running { background: rgba(255,214,0,0.15); color: var(--yellow); }
-.task-status.success { background: rgba(0,230,118,0.15); color: var(--green); }
-.task-status.failed { background: rgba(255,23,68,0.15); color: var(--red); }
-.task-status.cancelled { background: rgba(136,146,160,0.15); color: var(--text-dim); }
-.task-status.pending { background: rgba(124,77,255,0.15); color: var(--accent2); }
 </style>
-
-
-<script>
-const $ = id => document.getElementById(id);
-let refreshTimer = null;
-const API_BASE = location.origin;
-
-function getAdminPassword() { return sessionStorage.getItem('adminPassword') || ''; }
-function adminHeaders() { const pw = getAdminPassword(); return pw ? { 'Authorization': 'Bearer ' + pw } : {}; }
-
-async function apiFetch(url, options = {}) {
-  const headers = { ...adminHeaders(), ...(options.headers || {}) };
-  const res = await fetch(url, { ...options, headers });
-  if (res.status === 401) { sessionStorage.removeItem('adminPassword'); $('authOverlay').style.display = 'flex'; throw new Error('unauthorized'); }
-  return res;
-}
-
-function formatTime(iso) {
-  if (!iso) return '—';
-  const d = new Date(iso); const diff = d - new Date();
-  if (diff < 0) return '<span style="color:var(--red)">已过期</span>';
-  const h = Math.floor(diff / 3600000); const m = Math.floor((diff % 3600000) / 60000);
-  if (h > 24) return Math.floor(h/24) + '天' + h%24 + '时';
-  return h + '时' + m + '分';
-}
-function healthDot(ec, ht) {
-  if (ec >= 3 || !ht) return '<span class="dot dot-red"></span>不可用';
-  if (ec >= 1) return '<span class="dot dot-yellow"></span>异常';
-  return '<span class="dot dot-green"></span>正常';
-}
-
-// ===== Tabs =====
-function switchTab(name) {
-  document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
-  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-  $('tab-' + name).style.display = '';
-  event.target.classList.add('active');
-  if (name === 'register') { fetchRegConfig(); fetchRegTasks(); }
-  if (name === 'keys') fetchApiKeys();
-  if (name === 'models') fetchStats();
-}
-
-
-// ===== Overview =====
-function renderStatus(data) {
-  $('status').innerHTML = '<span class="status-ok">正常</span>';
-  $('capacity').textContent = data.totalCapacity;
-  $('accountCount').textContent = data.pool.length;
-  $('queueCount').textContent = data.queue.queued;
-  $('apiKeyCount').textContent = data.apiKeyCount || 0;
-  const q = data.queue.queued, qMax = data.queue.maxQueueSize, pct = Math.min(100, (q / qMax) * 100);
-  $('queueBar').style.width = pct + '%';
-  $('queueBar').style.background = pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--yellow)' : 'var(--green)';
-  $('queueLabel').textContent = q + ' / ' + qMax;
-  const pb = $('poolBody');
-  if (!data.pool.length) { pb.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim)">无账号</td></tr>'; }
-  else { pb.innerHTML = data.pool.map(t => `<tr><td>${(t.email||'—').slice(0,20)}</td><td>${t.hasToken?'<span style="color:var(--green)">✓</span>':'<span style="color:var(--red)">✗</span>'}</td><td>${formatTime(t.expiresAt)}</td><td>${t.errorCount}</td><td>${t.activeRequests}/${t.maxConcurrent}</td><td>${healthDot(t.errorCount,t.hasToken)}</td><td><button class="btn btn-sm" onclick="checkToken('${t.email}')">检测</button> <button class="btn btn-danger btn-sm" onclick="removeToken('${t.email}')">删除</button></td></tr>`).join(''); }
-  $('lastRefresh').textContent = new Date().toLocaleTimeString();
-}
-
-function renderModels(data) {
-  const grid = $('modelGrid'); const models = data.data || [];
-  if (!models.length) { grid.innerHTML = '<div style="color:var(--text-dim)">无可用模型</div>'; return; }
-  const families = {};
-  for (const m of models) { const f = m.id.replace(/[-.](?:thinking|search|vision|vl|plus|pro|max|lite|mini|turbo|instruct|chat|coder|math|research|creative|audio|tts).*/i,'') || m.id; if(!families[f])families[f]=[]; families[f].push(m); }
-  let html = '';
-  for (const [f, ms] of Object.entries(families)) {
-    html += `<details style="margin-bottom:6px"><summary style="cursor:pointer;color:var(--accent2);font-size:0.88em;padding:4px 0">${f} <span style="color:var(--text-dim);font-size:0.78em">(${ms.length})</span></summary><div class="model-grid" style="margin-top:6px">`;
-    for (const m of ms) { const caps=m.capabilities||{}; const tags=[]; if(caps.thinking)tags.push('思考'); if(caps.search)tags.push('搜索'); if(caps.vision)tags.push('视觉'); if(caps.deep_research)tags.push('研究'); if(caps.image_gen)tags.push('图片'); if(caps.video_gen)tags.push('视频');
-      html += `<div class="model-chip"><div class="model-dot"></div><div><div>${m.id}</div>${tags.length?`<div class="cap-tags">${tags.map(c=>`<span class="cap-tag">${c}</span>`).join('')}</div>`:''}</div></div>`; }
-    html += '</div></details>';
-  }
-  grid.innerHTML = html;
-}
-
-async function fetchStats() {
-  try {
-    const res = await apiFetch(`${API_BASE}/admin/api/stats`);
-    if (res.ok) renderStatus(await res.json());
-    const mRes = await apiFetch(`${API_BASE}/v1/models`).catch(()=>null);
-    if (mRes && mRes.ok) renderModels(await mRes.json());
-  } catch(e) { if(e.message!=='unauthorized') console.error(e); }
-}
-
-
-// ===== API Keys =====
-function renderApiKeys(keys) {
-  const list = $('keyList');
-  if (!keys || !keys.length) { list.innerHTML = '<div style="color:var(--text-dim);font-size:0.85em">未配置 API Key（所有请求无需认证）</div>'; return; }
-  list.innerHTML = keys.map(k => `<div class="key-item"><span>${k.key}</span><button class="btn btn-danger btn-sm" onclick="removeKey('${k.full}')">删除</button></div>`).join('');
-}
-async function fetchApiKeys() { try { const r = await apiFetch(`${API_BASE}/admin/api/keys`); if(r.ok){const d=await r.json();renderApiKeys(d.keys);} } catch(e){} }
-async function removeKey(k) { if(!confirm('确定删除?'))return; try{await apiFetch(`${API_BASE}/admin/api/keys/remove`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})}); fetchApiKeys();fetchStats();}catch(e){} }
-
-$('addKeyForm').addEventListener('submit', async e => {
-  e.preventDefault(); const key=$('addKeyInput').value.trim(); const msg=$('addKeyMsg');
-  if(!key){msg.className='msg msg-err';msg.textContent='请输入Key';return;}
-  msg.textContent='添加中...';msg.className='msg';
-  try{const r=await apiFetch(`${API_BASE}/admin/api/keys/add`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key})});const d=await r.json();
-    if(d.success){msg.className='msg msg-ok';msg.textContent='添加成功！';$('addKeyInput').value='';fetchApiKeys();fetchStats();}
-    else{msg.className='msg msg-err';msg.textContent=d.error?.message||'失败';}}
-  catch(e){msg.className='msg msg-err';msg.textContent='请求失败';}
-});
-
-// ===== Token Management =====
-async function removeToken(email) {
-  if (!confirm(`确定删除令牌: ${email}？`)) return;
-  try {
-    const r = await apiFetch(`${API_BASE}/admin/api/token/remove`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
-    const d = await r.json();
-    if (d.success) fetchStats();
-    else alert(d.error?.message || '删除失败');
-  } catch (e) { if (e.message !== 'unauthorized') alert('请求失败'); }
-}
-
-async function checkToken(email) {
-  try {
-    const r = await apiFetch(`${API_BASE}/admin/api/token/check`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
-    const d = await r.json();
-    if (d.success) {
-      const res = d.result;
-      const status = res.valid ? '✓ 有效' : '✗ 无效';
-      alert(`令牌检测: ${email}\n状态: ${status}\n${res.error ? '详情: ' + res.error : ''}`);
-      fetchStats();
-    } else { alert(d.error?.message || '检测失败'); }
-  } catch (e) { if (e.message !== 'unauthorized') alert('请求失败'); }
-}
-
-async function checkAllTokens() {
-  const msg = $('checkAllMsg'); msg.textContent = '检测中...'; msg.className = 'msg';
-  try {
-    const r = await apiFetch(`${API_BASE}/admin/api/token/check-all`, { method: 'POST' });
-    const d = await r.json();
-    if (d.success) {
-      const valid = d.results.filter(r => r.valid).length;
-      const total = d.results.length;
-      msg.className = 'msg msg-ok';
-      msg.textContent = `检测完成: ${valid}/${total} 有效`;
-      if (d.results.some(r => !r.valid)) {
-        msg.textContent += ' | 无效: ' + d.results.filter(r => !r.valid).map(r => `${r.email}(${r.error})`).join(', ');
-        msg.className = 'msg msg-err';
-      }
-      fetchStats();
-    } else { msg.className = 'msg msg-err'; msg.textContent = d.error?.message || '检测失败'; }
-  } catch (e) { msg.className = 'msg msg-err'; msg.textContent = '请求失败'; }
-}
-
-$('addTokenForm').addEventListener('submit', async e => {
-  e.preventDefault(); const token=$('addTokenInput').value.trim(); const msg=$('addTokenMsg');
-  msg.textContent='添加中...';msg.className='msg';
-  try{const r=await apiFetch(`${API_BASE}/admin/api/token/add`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});const d=await r.json();
-    if(d.success){msg.className='msg msg-ok';msg.textContent='添加成功！';$('addTokenInput').value='';fetchStats();}
-    else{msg.className='msg msg-err';msg.textContent=d.error?.message||'失败';}}
-  catch(e){msg.className='msg msg-err';msg.textContent='请求失败';}
-});
-
-$('loginForm').addEventListener('submit', async e => {
-  e.preventDefault(); const email=$('loginEmail').value.trim(),password=$('loginPassword').value; const msg=$('loginMsg');
-  msg.textContent='登录中...';msg.className='msg';
-  try{const r=await apiFetch(`${API_BASE}/admin/api/token/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});const d=await r.json();
-    if(d.success){msg.className='msg msg-ok';msg.textContent='登录成功！';$('loginEmail').value='';$('loginPassword').value='';fetchStats();}
-    else{msg.className='msg msg-err';msg.textContent=d.error?.message||'失败';}}
-  catch(e){msg.className='msg msg-err';msg.textContent='请求失败';}
-});
-
-
-// ===== Register =====
-async function fetchRegConfig() {
-  try { const r=await apiFetch(`${API_BASE}/admin/api/register/config`); const d=await r.json();
-    if(d.success){$('regMailApi').value=d.config.mailApi||'';$('regMailKey').value=d.config.mailKey||'';} }catch(e){}
-}
-
-$('saveRegConfigBtn').addEventListener('click', async () => {
-  const mailApi=$('regMailApi').value.trim(), mailKey=$('regMailKey').value.trim();
-  const msg=$('regConfigMsg'); msg.textContent='保存中...';msg.className='msg';
-  try{const r=await apiFetch(`${API_BASE}/admin/api/register/config`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mailApi,mailKey})});
-    const d=await r.json();
-    if(d.success){msg.className='msg msg-ok';msg.textContent='配置已保存';fetchRegConfig();}
-    else{msg.className='msg msg-err';msg.textContent=d.error?.message||'失败';}}
-  catch(e){msg.className='msg msg-err';msg.textContent='请求失败';}
-});
-
-$('startRegBtn').addEventListener('click', async () => {
-  const email=$('regEmail').value.trim()||undefined;
-  const password=$('regPassword').value.trim()||undefined;
-  const count=parseInt($('regCount').value)||1;
-  const autoAddToken=$('regAutoAdd').checked;
-  const msg=$('regStartMsg'); msg.textContent='启动中...';msg.className='msg';
-  try{const r=await apiFetch(`${API_BASE}/admin/api/register/start`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,count,autoAddToken})});
-    const d=await r.json();
-    if(d.success){msg.className='msg msg-ok';msg.textContent=`已启动 ${d.tasks.length} 个任务`;fetchRegTasks();}
-    else{msg.className='msg msg-err';msg.textContent=d.error?.message||'失败';}}
-  catch(e){msg.className='msg msg-err';msg.textContent='请求失败';}
-});
-
-$('clearRegBtn').addEventListener('click', async () => {
-  try{await apiFetch(`${API_BASE}/admin/api/register/clear`,{method:'POST'});fetchRegTasks();}catch(e){}
-});
-
-async function fetchRegTasks() {
-  try{const r=await apiFetch(`${API_BASE}/admin/api/register/tasks`);const d=await r.json();
-    if(d.success) renderRegTasks(d.tasks);}catch(e){}
-}
-
-function renderRegTasks(tasks) {
-  const el=$('regTaskList');
-  if(!tasks.length){el.innerHTML='<div style="color:var(--text-dim);font-size:0.85em">无任务</div>';$('regTaskDetailCard').style.display='none';return;}
-  el.innerHTML = tasks.map(t => `<div class="task-item" style="flex-direction:column;align-items:stretch">
-    <div style="display:flex;align-items:center;justify-content:space-between">
-      <div class="task-info">
-        <strong>#${t.id}</strong> ${t.email||'(生成中)'} <span class="task-status ${t.status}">${t.status}</span>
-        ${t.error?`<span style="color:var(--red);font-size:0.8em"> ${t.error}</span>`:''}
-      </div>
-      <div style="display:flex;gap:6px">
-        ${t.status==='running'?`<button class="btn btn-danger btn-sm" onclick="cancelTask(${t.id})">取消</button>`:''}
-      </div>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div><h1>Qwen-2API 管理面板</h1><div class="meta">OpenAI 兼容代理 · chat.qwen.ai</div></div>
+    <div class="controls">
+      <select id="interval"><option value="5000">5秒</option><option value="10000" selected>10秒</option><option value="30000">30秒</option><option value="0">关闭</option></select>
+      <button id="refreshBtn">刷新</button>
     </div>
-  </div>`).join('');
-  // 自动加载所有任务的日志
-  loadAllTaskLogs(tasks);
-}
+  </header>
+  <div class="card" style="padding:8px 12px;margin-bottom:12px"><div class="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('overview')">总览</button>
+    <button class="tab-btn" onclick="switchTab('tokens')">令牌管理</button>
+    <button class="tab-btn" onclick="switchTab('keys')">API Key</button>
+    <button class="tab-btn" onclick="switchTab('models')">模型</button>
+  </div></div>
 
-async function loadAllTaskLogs(tasks) {
-  let logsHtml = '';
-  for (const t of tasks) {
-    try {
-      const r = await apiFetch(`${API_BASE}/admin/api/register/task/${t.id}`);
-      const d = await r.json();
-      if (d.success && d.task.logs.length > 0) {
-        logsHtml += `<div style="margin-bottom:12px"><div style="font-size:0.85em;color:var(--accent2);margin-bottom:4px;font-weight:600">#${t.id} - ${d.task.email||'未知'} [${d.task.status}]</div><div class="log-box">${d.task.logs.join('\n')}</div></div>`;
-      }
-    } catch(e) {}
-  }
-  if (logsHtml) {
-    $('regTaskDetailCard').style.display = '';
-    $('regDetailTitle').textContent = '全部任务';
-    $('regTaskLogs').innerHTML = logsHtml;
-  } else {
-    $('regTaskDetailCard').style.display = 'none';
-  }
-}
+  <div id="tab-overview" class="tab-content">
+    <div class="card"><h2>总览</h2><div class="stats-grid">
+      <div class="stat-item"><div class="label">状态</div><div class="value" id="status">-</div></div>
+      <div class="stat-item"><div class="label">总容量</div><div class="value" id="capacity">-</div></div>
+      <div class="stat-item"><div class="label">账号数</div><div class="value" id="accountCount">-</div></div>
+      <div class="stat-item"><div class="label">队列</div><div class="value" id="queueCount">-</div></div>
+      <div class="stat-item"><div class="label">API Keys</div><div class="value" id="apiKeyCount">-</div></div>
+    </div></div>
+    <div class="card"><h2>请求队列</h2><div class="bar-wrap"><div class="bar-fill" id="queueBar" style="width:0%;background:var(--green)"></div><div class="bar-label" id="queueLabel">0 / 100</div></div></div>
+    <div class="card"><h2>令牌池 <button class="btn btn-sm" onclick="checkAllTokens()" style="margin-left:10px">全部检测</button></h2><div id="checkAllMsg" class="msg"></div><div style="overflow-x:auto"><table><thead><tr><th>账号</th><th>令牌</th><th>过期</th><th>错误</th><th>并发</th><th>健康</th><th>操作</th></tr></thead><tbody id="poolBody"><tr><td colspan="7" class="loading">加载中...</td></tr></tbody></table></div></div>
+  </div>
 
-async function viewTaskLog(id) {
-  try{const r=await apiFetch(`${API_BASE}/admin/api/register/task/${id}`);const d=await r.json();
-    if(d.success){$('regTaskDetailCard').style.display='';$('regDetailTitle').textContent=`#${id} - ${d.task.email||''}`;
-      $('regTaskLogs').innerHTML=`<div class="log-box">${d.task.logs.join('\n')}</div>`;$('regTaskLogs').scrollTop=9999;}}catch(e){}
-}
+  <div id="tab-tokens" class="tab-content" style="display:none"><div class="card"><h2>令牌管理</h2><div class="forms-row"><div><h3 style="font-size:0.92em;margin-bottom:8px">添加 JWT 令牌</h3><form id="addTokenForm"><div class="form-group"><label>令牌字符串</label><input type="text" id="addTokenInput" placeholder="粘贴 Qwen JWT 令牌..." required></div><button type="submit" class="btn">添加</button><div class="msg" id="addTokenMsg"></div></form></div><div><h3 style="font-size:0.92em;margin-bottom:8px">登录获取令牌</h3><form id="loginForm"><div class="form-group"><label>邮箱</label><input type="email" id="loginEmail" placeholder="Qwen 账号邮箱" required></div><div class="form-group"><label>密码</label><input type="password" id="loginPassword" placeholder="Qwen 账号密码" required></div><button type="submit" class="btn">登录</button><div class="msg" id="loginMsg"></div></form></div></div></div></div>
 
-async function cancelTask(id) {
-  try{await apiFetch(`${API_BASE}/admin/api/register/cancel`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({taskId:id})});fetchRegTasks();}catch(e){}
-}
+  <div id="tab-keys" class="tab-content" style="display:none"><div class="card"><h2>API Key 管理</h2><form id="addKeyForm" style="display:flex;gap:8px;align-items:flex-end;margin-bottom:12px"><div class="form-group" style="flex:1;margin-bottom:0"><label>新 API Key</label><input type="text" id="addKeyInput" placeholder="输入新的 API Key（如 sk-xxx）"></div><button type="submit" class="btn">添加</button></form><div class="msg" id="addKeyMsg"></div><div class="key-list" id="keyList"><div class="loading">加载中...</div></div></div></div>
 
+  <div id="tab-models" class="tab-content" style="display:none"><div class="card"><h2>可用模型</h2><div id="modelGrid"><div class="loading">加载中...</div></div></div></div>
 
-// ===== Auth & Init =====
-$('authSubmitBtn').addEventListener('click', async () => {
-  const pw=$('authKeyInput').value.trim();
-  if(!pw){$('authMsg').className='msg msg-err';$('authMsg').textContent='请输入管理密码';return;}
-  try{const r=await fetch(`${API_BASE}/admin/api/auth/verify`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
-    const d=await r.json();
-    if(d.success){sessionStorage.setItem('adminPassword',pw);$('authOverlay').style.display='none';init();}
-    else{$('authMsg').className='msg msg-err';$('authMsg').textContent='密码错误';}}
-  catch(e){$('authMsg').className='msg msg-err';$('authMsg').textContent='验证失败';}
-});
+  <footer style="text-align:center;color:var(--text-dim);font-size:0.78em;padding:12px">上次刷新: <span id="lastRefresh">-</span></footer>
+</div>
+<div class="auth-overlay" id="authOverlay" style="display:none"><div class="auth-box"><h3>管理面板认证</h3><p style="font-size:0.85em;color:var(--text-dim);margin-bottom:12px">请输入管理密码</p><div class="form-group"><label>管理密码</label><input type="password" id="authKeyInput" placeholder="输入管理密码..."></div><button class="btn" id="authSubmitBtn">确认</button><div class="msg" id="authMsg"></div></div></div>
+<script>
+const $=id=>document.getElementById(id);let refreshTimer=null;const API_BASE=location.origin;
+function getAdminPassword(){return sessionStorage.getItem('adminPassword')||'';}
+function adminHeaders(){const pw=getAdminPassword();return pw?{'Authorization':'Bearer '+pw}:{};}
+async function apiFetch(url,options={}){const headers={...adminHeaders(),...(options.headers||{})};const res=await fetch(url,{...options,headers});if(res.status===401){sessionStorage.removeItem('adminPassword');$('authOverlay').style.display='flex';throw new Error('unauthorized');}return res;}
+function formatTime(iso){if(!iso)return'—';const d=new Date(iso);const diff=d-new Date();if(diff<0)return'<span style="color:var(--red)">已过期</span>';const h=Math.floor(diff/3600000);const m=Math.floor((diff%3600000)/60000);if(h>24)return Math.floor(h/24)+'天'+h%24+'时';return h+'时'+m+'分';}
+function healthDot(ec,ht){if(ec>=3||!ht)return'<span class="dot dot-red"></span>不可用';if(ec>=1)return'<span class="dot dot-yellow"></span>异常';return'<span class="dot dot-green"></span>正常';}
+function switchTab(name){document.querySelectorAll('.tab-content').forEach(el=>el.style.display='none');document.querySelectorAll('.tab-btn').forEach(el=>el.classList.remove('active'));$('tab-'+name).style.display='';event.target.classList.add('active');if(name==='keys')fetchApiKeys();if(name==='models')fetchStats();}
+function renderStatus(data){$('status').innerHTML='<span class="status-ok">正常</span>';$('capacity').textContent=data.totalCapacity;$('accountCount').textContent=data.pool.length;$('queueCount').textContent=data.queue.queued;$('apiKeyCount').textContent=data.apiKeyCount||0;const q=data.queue.queued,qMax=data.queue.maxQueueSize,pct=Math.min(100,(q/qMax)*100);$('queueBar').style.width=pct+'%';$('queueBar').style.background=pct>80?'var(--red)':pct>50?'var(--yellow)':'var(--green)';$('queueLabel').textContent=q+' / '+qMax;const pb=$('poolBody');if(!data.pool.length){pb.innerHTML='<tr><td colspan="7" style="color:var(--text-dim)">无账号</td></tr>';}else{pb.innerHTML=data.pool.map(t=>`<tr><td>${(t.email||'—').slice(0,20)}</td><td>${t.hasToken?'<span style="color:var(--green)">✓</span>':'<span style="color:var(--red)">✗</span>'}</td><td>${formatTime(t.expiresAt)}</td><td>${t.errorCount}</td><td>${t.activeRequests}/${t.maxConcurrent}</td><td>${healthDot(t.errorCount,t.hasToken)}</td><td><button class="btn btn-sm" onclick="checkToken('${t.email}')">检测</button> <button class="btn btn-danger btn-sm" onclick="removeToken('${t.email}')">删除</button></td></tr>`).join('');}$('lastRefresh').textContent=new Date().toLocaleTimeString();}
+function renderModels(data){const grid=$('modelGrid');const models=data.data||[];if(!models.length){grid.innerHTML='<div style="color:var(--text-dim)">无可用模型</div>';return;}const families={};for(const m of models){const f=m.id.replace(/[-.](?:thinking|search|vision|vl|plus|pro|max|lite|mini|turbo|instruct|chat|coder|math|research|creative|audio|tts).*/i,'')||m.id;if(!families[f])families[f]=[];families[f].push(m);}let html='';for(const[f,ms]of Object.entries(families)){html+=`<details style="margin-bottom:6px"><summary style="cursor:pointer;color:var(--accent2);font-size:0.88em;padding:4px 0">${f} <span style="color:var(--text-dim);font-size:0.78em">(${ms.length})</span></summary><div class="model-grid" style="margin-top:6px">`;for(const m of ms){const caps=m.capabilities||{};const tags=[];if(caps.thinking)tags.push('思考');if(caps.search)tags.push('搜索');if(caps.vision)tags.push('视觉');if(caps.deep_research)tags.push('研究');if(caps.image_gen)tags.push('图片');if(caps.video_gen)tags.push('视频');html+=`<div class="model-chip"><div class="model-dot"></div><div><div>${m.id}</div>${tags.length?`<div class="cap-tags">${tags.map(c=>`<span class="cap-tag">${c}</span>`).join('')}</div>`:''}</div></div>`;}html+='</div></details>';}grid.innerHTML=html;}
+async function fetchStats(){try{const res=await apiFetch(`${API_BASE}/admin/api/stats`);if(res.ok)renderStatus(await res.json());const mRes=await apiFetch(`${API_BASE}/v1/models`).catch(()=>null);if(mRes&&mRes.ok)renderModels(await mRes.json());}catch(e){if(e.message!=='unauthorized')console.error(e);}}
+function renderApiKeys(keys){const list=$('keyList');if(!keys||!keys.length){list.innerHTML='<div style="color:var(--text-dim);font-size:0.85em">未配置 API Key（所有请求无需认证）</div>';return;}list.innerHTML=keys.map(k=>`<div class="key-item"><span>${k.key}</span><button class="btn btn-danger btn-sm" onclick="removeKey('${k.full}')">删除</button></div>`).join('');}
+async function fetchApiKeys(){try{const r=await apiFetch(`${API_BASE}/admin/api/keys`);if(r.ok){const d=await r.json();renderApiKeys(d.keys);}}catch(e){}}
+async function removeKey(k){if(!confirm('确定删除?'))return;try{await apiFetch(`${API_BASE}/admin/api/keys/remove`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});fetchApiKeys();fetchStats();}catch(e){}}
+$('addKeyForm').addEventListener('submit',async e=>{e.preventDefault();const key=$('addKeyInput').value.trim();const msg=$('addKeyMsg');if(!key){msg.className='msg msg-err';msg.textContent='请输入Key';return;}msg.textContent='添加中...';msg.className='msg';try{const r=await apiFetch(`${API_BASE}/admin/api/keys/add`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key})});const d=await r.json();if(d.success){msg.className='msg msg-ok';msg.textContent='添加成功！';$('addKeyInput').value='';fetchApiKeys();fetchStats();}else{msg.className='msg msg-err';msg.textContent=d.error?.message||'失败';}}catch(e){msg.className='msg msg-err';msg.textContent='请求失败';}});
+async function removeToken(email){if(!confirm(`确定删除令牌: ${email}？`))return;try{const r=await apiFetch(`${API_BASE}/admin/api/token/remove`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});const d=await r.json();if(d.success)fetchStats();else alert(d.error?.message||'删除失败');}catch(e){if(e.message!=='unauthorized')alert('请求失败');}}
+async function checkToken(email){try{const r=await apiFetch(`${API_BASE}/admin/api/token/check`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});const d=await r.json();if(d.success){const res=d.result;alert(`令牌检测: ${email}\n状态: ${res.valid?'✓ 有效':'✗ 无效'}\n${res.error?'详情: '+res.error:''}`);fetchStats();}else{alert(d.error?.message||'检测失败');}}catch(e){if(e.message!=='unauthorized')alert('请求失败');}}
+async function checkAllTokens(){const msg=$('checkAllMsg');msg.textContent='检测中...';msg.className='msg';try{const r=await apiFetch(`${API_BASE}/admin/api/token/check-all`,{method:'POST'});const d=await r.json();if(d.success){const valid=d.results.filter(r=>r.valid).length;const total=d.results.length;msg.className='msg msg-ok';msg.textContent=`检测完成: ${valid}/${total} 有效`;if(d.results.some(r=>!r.valid)){msg.textContent+=' | 无效: '+d.results.filter(r=>!r.valid).map(r=>`${r.email}(${r.error})`).join(', ');msg.className='msg msg-err';}fetchStats();}else{msg.className='msg msg-err';msg.textContent=d.error?.message||'检测失败';}}catch(e){msg.className='msg msg-err';msg.textContent='请求失败';}}
+$('addTokenForm').addEventListener('submit',async e=>{e.preventDefault();const token=$('addTokenInput').value.trim();const msg=$('addTokenMsg');msg.textContent='添加中...';msg.className='msg';try{const r=await apiFetch(`${API_BASE}/admin/api/token/add`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});const d=await r.json();if(d.success){msg.className='msg msg-ok';msg.textContent='添加成功！';$('addTokenInput').value='';fetchStats();}else{msg.className='msg msg-err';msg.textContent=d.error?.message||'失败';}}catch(e){msg.className='msg msg-err';msg.textContent='请求失败';}});
+$('loginForm').addEventListener('submit',async e=>{e.preventDefault();const email=$('loginEmail').value.trim(),password=$('loginPassword').value;const msg=$('loginMsg');msg.textContent='登录中...';msg.className='msg';try{const r=await apiFetch(`${API_BASE}/admin/api/token/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});const d=await r.json();if(d.success){msg.className='msg msg-ok';msg.textContent='登录成功！';$('loginEmail').value='';$('loginPassword').value='';fetchStats();}else{msg.className='msg msg-err';msg.textContent=d.error?.message||'失败';}}catch(e){msg.className='msg msg-err';msg.textContent='请求失败';}});
+$('authSubmitBtn').addEventListener('click',async()=>{const pw=$('authKeyInput').value.trim();if(!pw){$('authMsg').className='msg msg-err';$('authMsg').textContent='请输入管理密码';return;}try{const r=await fetch(`${API_BASE}/admin/api/auth/verify`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});const d=await r.json();if(d.success){sessionStorage.setItem('adminPassword',pw);$('authOverlay').style.display='none';init();}else{$('authMsg').className='msg msg-err';$('authMsg').textContent='密码错误';}}catch(e){$('authMsg').className='msg msg-err';$('authMsg').textContent='验证失败';}});
 $('authKeyInput').addEventListener('keydown',e=>{if(e.key==='Enter')$('authSubmitBtn').click();});
-
-function setupRefresh() {
-  if(refreshTimer)clearInterval(refreshTimer);
-  const ms=parseInt($('interval').value);
-  if(ms>0)refreshTimer=setInterval(()=>{fetchStats(); if($('tab-register').style.display!=='none')fetchRegTasks();},ms);
-}
+function setupRefresh(){if(refreshTimer)clearInterval(refreshTimer);const ms=parseInt($('interval').value);if(ms>0)refreshTimer=setInterval(()=>{fetchStats();},ms);}
 $('interval').addEventListener('change',setupRefresh);
-$('refreshBtn').addEventListener('click',()=>{fetchStats();fetchApiKeys();fetchRegTasks();});
-
-async function init() {
-  try{const r=await fetch(`${API_BASE}/admin/api/auth-required`);const d=await r.json();
-    if(d.required){const saved=getAdminPassword();
-      if(saved){const vr=await fetch(`${API_BASE}/admin/api/auth/verify`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:saved})});
-        const vd=await vr.json();if(!vd.success){sessionStorage.removeItem('adminPassword');$('authOverlay').style.display='flex';return;}}
-      else{$('authOverlay').style.display='flex';return;}}}
-  catch(e){console.error('Init error:',e);}
-  fetchStats(); fetchApiKeys(); setupRefresh();
-}
+$('refreshBtn').addEventListener('click',()=>{fetchStats();fetchApiKeys();});
+async function init(){try{const r=await fetch(`${API_BASE}/admin/api/auth-required`);const d=await r.json();if(d.required){const saved=getAdminPassword();if(saved){const vr=await fetch(`${API_BASE}/admin/api/auth/verify`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:saved})});const vd=await vr.json();if(!vd.success){sessionStorage.removeItem('adminPassword');$('authOverlay').style.display='flex';return;}}else{$('authOverlay').style.display='flex';return;}}}catch(e){console.error('Init error:',e);}fetchStats();fetchApiKeys();setupRefresh();}
 init();
 </script>
 </body>

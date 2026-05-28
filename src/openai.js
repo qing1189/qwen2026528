@@ -1,6 +1,5 @@
 import { completion, parseSSEStream } from './chat.js';
 import { enqueueRequest, dispatchQueued } from './queue.js';
-import { getModels } from './models.js';
 import { hasTools, injectToolCallContext, parseToolCallsFromText, createSieve } from './toolcall.js';
 
 const MODE_SUFFIXES = {
