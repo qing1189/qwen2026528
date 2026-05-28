@@ -1,46 +1,19 @@
 import { createHash } from 'crypto';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { requestHeaders } from './headers.js';
+import { persistPool, persistApiKeys as persistApiKeysToFile, loadPersistedTokens, loadPersistedAccounts, loadPersistedApiKeys } from './persistence.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = resolve(__dirname, '..', 'data');
-const ENV_PATH = resolve(__dirname, '..', '.env');
 
-// ========== .env 持久化工具 ==========
+// ========== 持久化封装 ==========
 
-function updateEnvLine(key, value) {
-  try {
-    let content = '';
-    if (existsSync(ENV_PATH)) {
-      content = readFileSync(ENV_PATH, 'utf-8');
-    }
-    const line = `${key}=${value}`;
-    const lines = content.split(/\r?\n/);
-    let found = false;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith(`${key}=`)) {
-        lines[i] = line;
-        found = true;
-        break;
-      }
-    }
-    if (!found) lines.push(line);
-    writeFileSync(ENV_PATH, lines.join('\n'));
-  } catch (err) {
-    console.warn(`Failed to persist ${key} to .env:`, err.message);
-  }
+function persistTokensData() {
+  persistPool(accountPool);
 }
 
-function persistTokensToEnv() {
-  const aliveTokens = accountPool.filter(t => t.token).map(t => t.token);
-  if (aliveTokens.length === 0) return;
-  updateEnvLine('QWEN_TOKENS', aliveTokens.join(','));
-}
-
-function persistApiKeysToEnv() {
-  updateEnvLine('API_KEYS', apiKeys.join(','));
+function persistApiKeysData() {
+  persistApiKeysToFile(apiKeys);
 }
 
 // ========== 多 API Key 管理 ==========
@@ -48,11 +21,11 @@ function persistApiKeysToEnv() {
 let apiKeys = [];
 
 export function loadApiKeys() {
-  // 兼容旧的单 API_KEY 和新的多 API_KEYS
   const singleKey = process.env.API_KEY?.trim();
   const multiKeys = process.env.API_KEYS?.trim();
 
   const keySet = new Set();
+  // 从环境变量加载
   if (multiKeys) {
     for (const k of multiKeys.split(',').map(s => s.trim()).filter(Boolean)) {
       keySet.add(k);
@@ -60,6 +33,10 @@ export function loadApiKeys() {
   }
   if (singleKey) {
     keySet.add(singleKey);
+  }
+  // 从持久化文件加载
+  for (const k of loadPersistedApiKeys()) {
+    if (k) keySet.add(k);
   }
   apiKeys = [...keySet];
   console.log(`API Keys loaded: ${apiKeys.length} key(s)`);
@@ -86,7 +63,7 @@ export function addApiKey(key) {
   if (!trimmed) throw new Error('API Key cannot be empty');
   if (apiKeys.includes(trimmed)) throw new Error('API Key already exists');
   apiKeys.push(trimmed);
-  persistApiKeysToEnv();
+  persistApiKeysData();
   return { success: true, total: apiKeys.length };
 }
 
@@ -94,7 +71,7 @@ export function removeApiKey(key) {
   const idx = apiKeys.indexOf(key.trim());
   if (idx === -1) throw new Error('API Key not found');
   apiKeys.splice(idx, 1);
-  persistApiKeysToEnv();
+  persistApiKeysData();
   return { success: true, total: apiKeys.length };
 }
 
@@ -140,6 +117,7 @@ export function loadAccounts() {
   const accountsStr = process.env.QWEN_ACCOUNTS?.trim();
   const tokensStr = process.env.QWEN_TOKENS?.trim();
 
+  // 从环境变量加载
   if (accountsStr) {
     for (const entry of accountsStr.split(',')) {
       const [email, ...passParts] = entry.trim().split(':');
@@ -167,8 +145,31 @@ export function loadAccounts() {
     }
   }
 
+  // 从持久化文件加载（去重）
+  const existingEmails = new Set(accountPool.map(t => t.email));
+  const existingTokens = new Set(accountPool.map(t => t.token).filter(Boolean));
+
+  for (const acc of loadPersistedAccounts()) {
+    if (acc.email && acc.password && !existingEmails.has(acc.email)) {
+      accountPool.push({ email: acc.email, password: acc.password, token: null, expiresAt: 0, errorCount: 0, activeRequests: 0, weight: WEIGHT_INITIAL, cooldownUntil: 0, lastRequestAt: 0 });
+      existingEmails.add(acc.email);
+    }
+  }
+
+  for (const token of loadPersistedTokens()) {
+    if (token && !existingTokens.has(token)) {
+      const decoded = decodeJWT(token);
+      const email = decoded?.id || 'token-user';
+      if (!existingEmails.has(email)) {
+        accountPool.push({ email, password: null, token, expiresAt: (decoded?.exp || 0) * 1000, errorCount: 0, activeRequests: 0, weight: WEIGHT_INITIAL, cooldownUntil: 0, lastRequestAt: 0 });
+        existingEmails.add(email);
+        existingTokens.add(token);
+      }
+    }
+  }
+
   if (accountPool.length === 0) {
-    console.log('  No QWEN_ACCOUNTS or QWEN_TOKENS configured. Add tokens via admin panel.');
+    console.log('  No accounts configured. Add tokens via admin panel.');
   }
 
   return accountPool;
@@ -332,7 +333,7 @@ export function addTokenToPool(tokenStr) {
     lastRequestAt: 0,
   };
   accountPool.push(entry);
-  persistTokensToEnv();
+  persistTokensData();
   return entry;
 }
 
@@ -346,7 +347,7 @@ export async function loginAndAddToken(email, password) {
     existing.errorCount = 0;
     existing.weight = WEIGHT_INITIAL;
     existing.cooldownUntil = 0;
-    persistTokensToEnv();
+    persistTokensData();
     return existing;
   }
   const decoded = decodeJWT(token);
@@ -362,7 +363,7 @@ export async function loginAndAddToken(email, password) {
     lastRequestAt: 0,
   };
   accountPool.push(entry);
-  persistTokensToEnv();
+  persistTokensData();
   return entry;
 }
 
@@ -371,7 +372,7 @@ export function removeTokenFromPool(email) {
   if (idx === -1) throw new Error('令牌不存在');
   if (accountPool[idx].activeRequests > 0) throw new Error('令牌正在使用中，请稍后再删除');
   accountPool.splice(idx, 1);
-  persistTokensToEnv();
+  persistTokensData();
   return { success: true, remaining: accountPool.length };
 }
 
