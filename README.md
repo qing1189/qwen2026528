@@ -1,4 +1,4 @@
-# Qwen-2API
+# Qwen-网关
 
 将 [Qwen](https://chat.qwen.ai) 网页版聊天接口转换为 **OpenAI 兼容 API** 的反向代理服务。
 
