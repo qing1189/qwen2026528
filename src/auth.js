@@ -153,7 +153,7 @@ export function loadAccounts() {
   }
 
   if (accountPool.length === 0) {
-    throw new Error('No QWEN_ACCOUNTS or QWEN_TOKENS configured');
+    console.log('  No QWEN_ACCOUNTS or QWEN_TOKENS configured. Add tokens via admin panel.');
   }
 
   return accountPool;
