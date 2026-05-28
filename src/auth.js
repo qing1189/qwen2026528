@@ -105,6 +105,17 @@ export function isApiKeyRequired() {
 const BASE_URL = 'https://chat.qwen.ai';
 const MAX_CONCURRENT_PER_TOKEN = 10;
 
+// ========== 智能权重轮询配置 ==========
+const WEIGHT_MAX = 100;           // 最大权重
+const WEIGHT_INITIAL = 100;       // 初始权重
+const WEIGHT_SUCCESS_BONUS = 5;   // 成功加分
+const WEIGHT_FAIL_MINOR = -15;    // 轻微错误（超时/限流）扣分
+const WEIGHT_FAIL_MAJOR = -30;    // 严重错误（认证失败）扣分
+const WEIGHT_COOLDOWN_THRESHOLD = 20;  // 权重低于此值进入冷却
+const COOLDOWN_DURATION_MS = 60000;    // 冷却时间 60 秒
+const WEIGHT_AFTER_COOLDOWN = 50;      // 冷却恢复后权重
+const MIN_REQUEST_INTERVAL_MS = 500;   // 同令牌最小请求间隔
+
 function sha256(text) {
   return createHash('sha256').update(text, 'utf-8').digest('hex');
 }
@@ -134,7 +145,7 @@ export function loadAccounts() {
       const [email, ...passParts] = entry.trim().split(':');
       const password = passParts.join(':');
       if (email && password) {
-        accountPool.push({ email, password, token: null, expiresAt: 0, errorCount: 0, activeRequests: 0 });
+        accountPool.push({ email, password, token: null, expiresAt: 0, errorCount: 0, activeRequests: 0, weight: WEIGHT_INITIAL, cooldownUntil: 0, lastRequestAt: 0 });
       }
     }
   }
@@ -149,6 +160,9 @@ export function loadAccounts() {
         expiresAt: (decoded?.exp || 0) * 1000,
         errorCount: 0,
         activeRequests: 0,
+        weight: WEIGHT_INITIAL,
+        cooldownUntil: 0,
+        lastRequestAt: 0,
       });
     }
   }
@@ -204,18 +218,47 @@ export async function initAccountPool() {
 }
 
 export function acquireToken() {
-  let candidates = accountPool.filter(t => t.errorCount < 3 && t.activeRequests < MAX_CONCURRENT_PER_TOKEN && t.token);
+  const now = Date.now();
 
+  // 过滤可用候选：有令牌、未满并发、不在冷却中
+  let candidates = accountPool.filter(t =>
+    t.token &&
+    t.activeRequests < MAX_CONCURRENT_PER_TOKEN &&
+    now >= t.cooldownUntil &&
+    (now - t.lastRequestAt) >= MIN_REQUEST_INTERVAL_MS
+  );
+
+  // 如果没有满足间隔要求的，放宽间隔限制
   if (candidates.length === 0) {
-    candidates = accountPool.filter(t => t.activeRequests < MAX_CONCURRENT_PER_TOKEN && t.token);
-  }
-  if (candidates.length === 0) {
-    return null;
+    candidates = accountPool.filter(t =>
+      t.token &&
+      t.activeRequests < MAX_CONCURRENT_PER_TOKEN &&
+      now >= t.cooldownUntil
+    );
   }
 
-  candidates.sort((a, b) => a.activeRequests - b.activeRequests);
-  const chosen = candidates[0];
+  // 仍然没有，尝试包含刚从冷却中恢复的
+  if (candidates.length === 0) {
+    // 检查是否有令牌冷却已到期，恢复权重
+    for (const t of accountPool) {
+      if (t.token && t.cooldownUntil > 0 && now >= t.cooldownUntil) {
+        t.weight = WEIGHT_AFTER_COOLDOWN;
+        t.cooldownUntil = 0;
+        t.errorCount = 0;
+        console.log(`  [POOL] ${t.email} 冷却结束，权重恢复到 ${WEIGHT_AFTER_COOLDOWN}`);
+      }
+    }
+    candidates = accountPool.filter(t =>
+      t.token && t.activeRequests < MAX_CONCURRENT_PER_TOKEN && now >= t.cooldownUntil
+    );
+  }
+
+  if (candidates.length === 0) return null;
+
+  // 加权随机选择
+  const chosen = weightedRandomSelect(candidates);
   chosen.activeRequests++;
+  chosen.lastRequestAt = now;
 
   let released = false;
   const release = () => {
@@ -227,14 +270,45 @@ export function acquireToken() {
   return { token: chosen.token, account: chosen, release };
 }
 
-export function reportTokenError(token) {
+/**
+ * 加权随机选择 — 权重越高被选中概率越大
+ */
+function weightedRandomSelect(candidates) {
+  const totalWeight = candidates.reduce((sum, t) => sum + Math.max(t.weight, 1), 0);
+  let rand = Math.random() * totalWeight;
+  for (const t of candidates) {
+    rand -= Math.max(t.weight, 1);
+    if (rand <= 0) return t;
+  }
+  return candidates[candidates.length - 1];
+}
+
+/**
+ * 报告令牌错误 — 区分错误严重程度
+ * @param {string} token
+ * @param {'minor'|'major'} severity - minor: 超时/限流, major: 认证失败/封禁
+ */
+export function reportTokenError(token, severity = 'minor') {
   const entry = accountPool.find(t => t.token === token);
-  if (entry) entry.errorCount++;
+  if (!entry) return;
+
+  entry.errorCount++;
+  const penalty = severity === 'major' ? WEIGHT_FAIL_MAJOR : WEIGHT_FAIL_MINOR;
+  entry.weight = Math.max(0, entry.weight + penalty);
+
+  // 检查是否需要进入冷却
+  if (entry.weight <= WEIGHT_COOLDOWN_THRESHOLD) {
+    entry.cooldownUntil = Date.now() + COOLDOWN_DURATION_MS;
+    console.log(`  [POOL] ${entry.email} 权重过低 (${entry.weight})，进入冷却 ${COOLDOWN_DURATION_MS / 1000}s`);
+  }
 }
 
 export function reportTokenSuccess(token) {
   const entry = accountPool.find(t => t.token === token);
-  if (entry) entry.errorCount = 0;
+  if (!entry) return;
+
+  entry.errorCount = 0;
+  entry.weight = Math.min(WEIGHT_MAX, entry.weight + WEIGHT_SUCCESS_BONUS);
 }
 
 export async function refreshToken(entry) {
@@ -253,6 +327,9 @@ export function addTokenToPool(tokenStr) {
     expiresAt: (decoded?.exp || 0) * 1000,
     errorCount: 0,
     activeRequests: 0,
+    weight: WEIGHT_INITIAL,
+    cooldownUntil: 0,
+    lastRequestAt: 0,
   };
   accountPool.push(entry);
   persistTokensToEnv();
@@ -267,6 +344,8 @@ export async function loginAndAddToken(email, password) {
     const decoded = decodeJWT(token);
     existing.expiresAt = (decoded?.exp || 0) * 1000;
     existing.errorCount = 0;
+    existing.weight = WEIGHT_INITIAL;
+    existing.cooldownUntil = 0;
     persistTokensToEnv();
     return existing;
   }
@@ -278,6 +357,9 @@ export async function loginAndAddToken(email, password) {
     expiresAt: (decoded?.exp || 0) * 1000,
     errorCount: 0,
     activeRequests: 0,
+    weight: WEIGHT_INITIAL,
+    cooldownUntil: 0,
+    lastRequestAt: 0,
   };
   accountPool.push(entry);
   persistTokensToEnv();
@@ -365,6 +447,7 @@ export async function checkAllTokensHealth() {
 }
 
 export function getPoolInfo() {
+  const now = Date.now();
   return accountPool.map((t, idx) => ({
     id: idx,
     email: t.email,
@@ -373,6 +456,9 @@ export function getPoolInfo() {
     errorCount: t.errorCount,
     activeRequests: t.activeRequests,
     maxConcurrent: MAX_CONCURRENT_PER_TOKEN,
+    weight: t.weight,
+    cooling: t.cooldownUntil > now,
+    cooldownRemaining: t.cooldownUntil > now ? Math.ceil((t.cooldownUntil - now) / 1000) : 0,
   }));
 }
 

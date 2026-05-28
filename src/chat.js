@@ -85,8 +85,13 @@ export async function completion({ token, model, messages, chatMode = 't2t', thi
   });
 
   if (!res.ok) {
-    reportTokenError(token);
     const text = await res.text();
+    // 区分错误类型
+    if (res.status === 401 || res.status === 403) {
+      reportTokenError(token, 'major');
+    } else {
+      reportTokenError(token, 'minor');
+    }
     throw new Error(`Completion failed: ${res.status} ${text}`);
   }
 
