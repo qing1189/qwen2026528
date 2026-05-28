@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'crypto';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { requestHeaders } from './headers.js';
@@ -7,28 +7,98 @@ import { requestHeaders } from './headers.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENV_PATH = resolve(__dirname, '..', '.env');
 
-function persistTokensToEnv() {
-  try {
-    let content = readFileSync(ENV_PATH, 'utf-8');
-    const aliveTokens = accountPool.filter(t => t.token).map(t => t.token);
-    if (aliveTokens.length === 0) return;
+// ========== .env 持久化工具 ==========
 
-    const line = `QWEN_TOKENS=${aliveTokens.join(',')}`;
+function updateEnvLine(key, value) {
+  try {
+    let content = '';
+    if (existsSync(ENV_PATH)) {
+      content = readFileSync(ENV_PATH, 'utf-8');
+    }
+    const line = `${key}=${value}`;
     const lines = content.split(/\r?\n/);
     let found = false;
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith('QWEN_TOKENS=')) {
+      if (lines[i].startsWith(`${key}=`)) {
         lines[i] = line;
         found = true;
         break;
       }
     }
     if (!found) lines.push(line);
-
     writeFileSync(ENV_PATH, lines.join('\n'));
   } catch (err) {
-    console.warn('Failed to persist tokens to .env:', err.message);
+    console.warn(`Failed to persist ${key} to .env:`, err.message);
   }
+}
+
+function persistTokensToEnv() {
+  const aliveTokens = accountPool.filter(t => t.token).map(t => t.token);
+  if (aliveTokens.length === 0) return;
+  updateEnvLine('QWEN_TOKENS', aliveTokens.join(','));
+}
+
+function persistApiKeysToEnv() {
+  updateEnvLine('API_KEYS', apiKeys.join(','));
+}
+
+// ========== 多 API Key 管理 ==========
+
+let apiKeys = [];
+
+export function loadApiKeys() {
+  // 兼容旧的单 API_KEY 和新的多 API_KEYS
+  const singleKey = process.env.API_KEY?.trim();
+  const multiKeys = process.env.API_KEYS?.trim();
+
+  const keySet = new Set();
+  if (multiKeys) {
+    for (const k of multiKeys.split(',').map(s => s.trim()).filter(Boolean)) {
+      keySet.add(k);
+    }
+  }
+  if (singleKey) {
+    keySet.add(singleKey);
+  }
+  apiKeys = [...keySet];
+  console.log(`API Keys loaded: ${apiKeys.length} key(s)`);
+  return apiKeys;
+}
+
+export function validateApiKey(key) {
+  // 如果没有配置任何 key，则不需要验证
+  if (apiKeys.length === 0) return true;
+  return apiKeys.includes(key);
+}
+
+export function getApiKeys() {
+  // 返回脱敏的 key 列表（只显示前8位和后4位）
+  return apiKeys.map((k, i) => ({
+    id: i,
+    key: k.length > 12 ? `${k.slice(0, 8)}...${k.slice(-4)}` : '***',
+    full: k,
+  }));
+}
+
+export function addApiKey(key) {
+  const trimmed = key.trim();
+  if (!trimmed) throw new Error('API Key cannot be empty');
+  if (apiKeys.includes(trimmed)) throw new Error('API Key already exists');
+  apiKeys.push(trimmed);
+  persistApiKeysToEnv();
+  return { success: true, total: apiKeys.length };
+}
+
+export function removeApiKey(key) {
+  const idx = apiKeys.indexOf(key.trim());
+  if (idx === -1) throw new Error('API Key not found');
+  apiKeys.splice(idx, 1);
+  persistApiKeysToEnv();
+  return { success: true, total: apiKeys.length };
+}
+
+export function isApiKeyRequired() {
+  return apiKeys.length > 0;
 }
 
 const BASE_URL = 'https://chat.qwen.ai';

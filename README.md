@@ -11,7 +11,9 @@
 - **多模态能力** — 通过模型后缀支持思考、深度研究、图片生成、视频生成、网页开发、PPT 等模式
 - **令牌自动刷新** — 配置账号密码后，令牌过期时自动重新登录
 - **Web 管理面板** — 内置可视化管理界面，实时查看令牌池状态、队列情况及可用模型
-- **API Key 保护** — 可选的 API Key 认证，保护服务安全
+- **独立管理密码** — 管理面板使用独立的 `ADMIN_PASSWORD`，与 API Key 完全分离
+- **多 API Key** — 支持配置多个 API Key，可通过 Web 面板动态增删，即时生效
+- **热加载** — 令牌、API Key 的增删操作即时生效，无需重启服务，自动持久化到 `.env`
 - **自动注册脚本** — 附带 Playwright 自动注册工具（`qwen-register.js`）
 
 ## 项目结构
@@ -19,7 +21,8 @@
 ```
 ├── src/
 │   ├── index.js       # 应用入口，Express 服务器与路由配置
-│   ├── auth.js        # 令牌池管理、登录、刷新、并发控制
+│   ├── auth.js        # 令牌池管理、多 API Key 管理、登录、刷新、并发控制
+│   ├── admin-auth.js  # 管理面板独立密码认证模块
 │   ├── chat.js        # Qwen API 对话接口（创建会话、发送消息、SSE 解析）
 │   ├── openai.js      # OpenAI 格式适配层（请求转换、流式/非流式响应）
 │   ├── models.js      # 模型列表获取与 OpenAI 格式转换
@@ -29,6 +32,9 @@
 │   ├── index.html     # 管理面板前端页面
 │   └── index.js       # 前端备用入口（独立 Express 服务）
 ├── qwen-register.js   # Qwen 账号自动注册脚本（Playwright）
+├── Dockerfile         # Docker 镜像构建文件
+├── docker-compose.yml # Docker Compose 编排文件
+├── .dockerignore      # Docker 构建排除文件
 ├── package.json
 ├── .env.example       # 环境变量示例
 └── .gitignore
@@ -62,10 +68,14 @@ cp .env.example .env
 |------|------|------|
 | `QWEN_ACCOUNTS` | Qwen 账号（邮箱:密码），多个用逗号分隔 | `email1:pass1,email2:pass2` |
 | `QWEN_TOKENS` | 直接提供 JWT 令牌，多个用逗号分隔 | `eyJ...,eyJ...` |
-| `API_KEY` | 可选，设置后所有 API 请求需携带此 Key | `sk-your-key` |
+| `API_KEYS` | 多个 API Key，逗号分隔（也可通过面板动态管理） | `sk-key1,sk-key2` |
+| `API_KEY` | 兼容旧配置，单个 API Key（会自动合并到 API_KEYS） | `sk-your-key` |
+| `ADMIN_PASSWORD` | 管理面板独立密码（与 API Key 分离） | `my-admin-pwd` |
 | `PORT` | 服务端口，默认 3000 | `3000` |
 
-> `QWEN_ACCOUNTS` 和 `QWEN_TOKENS` 至少配置一个。使用账号密码时服务会自动登录获取令牌并在过期后自动刷新。
+> - `QWEN_ACCOUNTS` 和 `QWEN_TOKENS` 至少配置一个。使用账号密码时服务会自动登录获取令牌并在过期后自动刷新。
+> - `API_KEYS` 未设置时所有 API 请求无需认证；设置后需携带有效 Key。
+> - `ADMIN_PASSWORD` 未设置时管理面板无需密码即可访问。
 
 ### 启动
 
@@ -141,12 +151,22 @@ curl http://localhost:3000/v1/models \
 
 访问 `/admin` 可使用内置管理面板，功能包括：
 
-- 实时查看服务状态、总容量、账号数和队列信息
+- 实时查看服务状态、总容量、账号数、队列信息和 API Key 数量
 - 令牌池详情（状态、过期时间、错误数、并发数）
 - 可用模型列表及能力标签
+- **API Key 管理** — 查看、添加、删除 API Key（即时生效，自动持久化）
 - 手动添加 JWT 令牌
 - 通过邮箱密码登录添加令牌
 - 自动刷新（5秒/10秒/30秒可选）
+
+### 认证说明
+
+管理面板使用独立的 `ADMIN_PASSWORD` 认证，**与 API Key 完全分离**：
+
+- **管理面板** → 使用 `ADMIN_PASSWORD` 登录
+- **API 接口** (`/v1/*`) → 使用 `API_KEYS` 中的任一 Key
+
+这样即使 API Key 泄露，攻击者也无法访问管理面板；管理员也无需知道具体的 API Key 即可管理服务。
 
 ## 自动注册
 
