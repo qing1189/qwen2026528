@@ -196,6 +196,46 @@ node qwen-register.js your@email.com your_password
 - **队列系统**：所有令牌满载时请求进入队列，有空闲时自动派发
 - **令牌持久化**：新增令牌会自动写入 `.env` 文件
 
+## Docker 部署
+
+### 快速启动
+
+```bash
+# 1. 配置环境变量
+cp .env.example .env
+# 编辑 .env 填入你的 Qwen 账号或令牌
+
+# 2. 构建并启动
+docker compose up -d
+
+# 查看日志
+docker compose logs -f
+
+# 停止服务
+docker compose down
+```
+
+### 单独构建镜像
+
+```bash
+# 构建
+docker build -t qwen-2api .
+
+# 运行
+docker run -d \
+  --name qwen-2api \
+  --restart unless-stopped \
+  -p 3000:3000 \
+  --env-file .env \
+  qwen-2api
+```
+
+### 端口配置
+
+- 容器内部固定监听 `3000` 端口
+- 通过 `.env` 中的 `PORT` 变量控制宿主机映射端口（默认 `3000`）
+- 如需修改宿主机端口，修改 `.env` 中 `PORT=8080` 即可
+
 ## 许可证
 
 MIT
